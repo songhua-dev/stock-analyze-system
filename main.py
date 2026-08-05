@@ -6,6 +6,7 @@ Flask 主程式（路由層）
 """
 
 import os
+import unicodedata  # 用於全形轉半形
 from flask import Flask, request, jsonify, render_template
 
 from src.us_Api_client import (
@@ -43,7 +44,12 @@ def analyze_route():
     範例請求：/api/analyze?market=us&symbol=PLTR&factors=rr,news
     """
     market = request.args.get("market", "us").lower().strip()
-    symbol = request.args.get("symbol", "").upper().strip()
+    raw_symbol = request.args.get("symbol", "")
+
+    # -----------------------------------------------------------------
+    # 全形轉半形 + 去空白 + 轉大寫 (解決手機全形輸入問題)
+    # -----------------------------------------------------------------
+    symbol = unicodedata.normalize('NFKC', raw_symbol).upper().strip()
 
     if not symbol:
         return jsonify({"error": "請提供股票代號 (symbol)"}), 400
@@ -72,52 +78,82 @@ def analyze_route():
                 "error": "🔒 雲端 Demo 版暫不開放 LLM 新聞情緒分析，避免 API 額度耗盡。請下載 GitHub 專案於本機執行。"
             }), 400
 
-    stock_info = fetch_stock_name(symbol)
-    stock_name = stock_info.get("stock_name", symbol)
+    # 抓取公司名稱（加 try-catch 避免崩潰）
+    try:
+        stock_info = fetch_stock_name(symbol)
+        stock_name = stock_info.get("stock_name", symbol)
+    except Exception:
+        stock_name = symbol
 
-    # 第1步：抓取美股基礎資料
+    # 第1步：抓取美股基礎資料 (K線)
     try:
         df = fetch_stock_data(symbol, days=120, source=data_source)
     except Exception as e:
         return jsonify({"error": f"❌ {data_source} 無法取得 {symbol} 的數據，請輸入正確股票代碼或其他股票。"}), 500
 
+    # 抓取目標價 (安全容錯，被限流時自動跳過不報 500)
     try:
         target_price_data = fetch_analyst_target_price(symbol)
     except Exception as e:
-        return jsonify({"error": f"分析師目標價抓取失敗: {e}"}), 500
+        print(f"⚠️ 分析師目標價抓取受限 ({e})")
+        target_price_data = {"target_mean": None, "target_high": None, "target_low": None}
 
     # 第2步：計算因子
     factor_results = {}
-    factor_results["candlestick"] = calculate_candlestick_score(df)
+    
+    # K線評分
+    try:
+        factor_results["candlestick"] = calculate_candlestick_score(df)
+    except Exception as e:
+        print(f"⚠️ Candlestick 計算失敗: {e}")
 
+    # RR評分
     if "rr" in selected_factors:
-        current_price = float(df['close'].iloc[-1])
-        support_price = float(df['close'].min())
-        target_price = target_price_data.get("target_mean")
-        if target_price is not None:
-            factor_results["rr"] = calculate_rr_score(current_price, support_price, target_price)
+        try:
+            current_price = float(df['close'].iloc[-1])
+            support_price = float(df['close'].min())
+            target_price = target_price_data.get("target_mean")
+            if target_price is not None:
+                factor_results["rr"] = calculate_rr_score(current_price, support_price, target_price)
+        except Exception as e:
+            print(f"⚠️ RR 計算失敗: {e}")
 
+    # 新聞評分
     if "news" in selected_factors:
-        factor_results["news"] = analyze_news_sentiment(symbol, limit=5, source=data_source)
+        try:
+            factor_results["news"] = analyze_news_sentiment(symbol, limit=5, source=data_source)
+        except Exception as e:
+            print(f"⚠️ News 計算失敗: {e}")
 
+    # Put/Call 選擇權評分
     if "put_call" in selected_factors:
-        options_data = fetch_options_ratio(symbol, min_days_out=3)
-        factor_results["put_call"] = calculate_put_call_ratio_score(
-            options_data.get("put_call_ratio"), 
-            options_data.get("data_type")
-        )
+        try:
+            options_data = fetch_options_ratio(symbol, min_days_out=3)
+            if options_data.get("usable"):
+                factor_results["put_call"] = calculate_put_call_ratio_score(
+                    options_data.get("put_call_ratio"), 
+                    options_data.get("data_type")
+                )
+        except Exception as e:
+            print(f"⚠️ Put/Call 計算失敗: {e}")
 
     # 第3步：成交量乘數
-    volume_result = calculate_volume_multiplier(df)
+    try:
+        volume_result = calculate_volume_multiplier(df)
+    except Exception:
+        volume_result = {"multiplier": 1.0, "detail": ""}
 
     # 第4步：算式整合與分析
-    analysis_result = analyze_stock(
-        df=df,
-        target_price_data=target_price_data,
-        factor_results=factor_results,
-        volume_result=volume_result,
-        insider_net_sell_ratio=None
-    )
+    try:
+        analysis_result = analyze_stock(
+            df=df,
+            target_price_data=target_price_data,
+            factor_results=factor_results,
+            volume_result=volume_result,
+            insider_net_sell_ratio=None
+        )
+    except Exception as e:
+        return jsonify({"error": f"量化分析計算發生錯誤: {e}"}), 500
 
     # 第5步：格式化輸出
     formatted_output = format_analysis_output(analysis_result)
@@ -126,7 +162,6 @@ def analyze_route():
 
 
 if __name__ == "__main__":
-    # 自動相容本機開發 (port 5000) 與 Render 雲端環境 (環境變數 PORT)
     port = int(os.getenv("PORT", 5000))
     debug = not IS_DEMO_MODE
     app.run(host="0.0.0.0", port=port, debug=debug)
