@@ -101,12 +101,12 @@ def analyze_route():
         print(f"⚠️ 分析師目標價抓取受限 ({e})")
         target_price_data = {"target_mean": None, "target_high": None, "target_low": None}
 
-    # 第2步：計算因子
+    # 第2步：計算因子 (均帶入 lang 參數進行國際化支援)
     factor_results = {}
     
     # K線評分
     try:
-        factor_results["candlestick"] = calculate_candlestick_score(df)
+        factor_results["candlestick"] = calculate_candlestick_score(df, lang=lang)
     except Exception as e:
         print(f"⚠️ Candlestick 計算失敗: {e}")
 
@@ -117,14 +117,14 @@ def analyze_route():
             support_price = float(df['close'].min())
             target_price = target_price_data.get("target_mean")
             if target_price is not None:
-                factor_results["rr"] = calculate_rr_score(current_price, support_price, target_price)
+                factor_results["rr"] = calculate_rr_score(current_price, support_price, target_price, lang=lang)
         except Exception as e:
             print(f"⚠️ RR 計算失敗: {e}")
 
     # 新聞評分
     if "news" in selected_factors:
         try:
-            factor_results["news"] = analyze_news_sentiment(symbol, limit=5, source=data_source)
+            factor_results["news"] = analyze_news_sentiment(symbol, limit=5, source=data_source, lang=lang)
         except Exception as e:
             print(f"⚠️ News 計算失敗: {e}")
 
@@ -135,14 +135,15 @@ def analyze_route():
             if options_data.get("usable"):
                 factor_results["put_call"] = calculate_put_call_ratio_score(
                     options_data.get("put_call_ratio"), 
-                    options_data.get("data_type")
+                    options_data.get("data_type"),
+                    lang=lang
                 )
         except Exception as e:
             print(f"⚠️ Put/Call 計算失敗: {e}")
 
     # 第3步：成交量乘數
     try:
-        volume_result = calculate_volume_multiplier(df)
+        volume_result = calculate_volume_multiplier(df, lang=lang)
     except Exception:
         volume_result = {"multiplier": 1.0, "detail": ""}
 

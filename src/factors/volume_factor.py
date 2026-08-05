@@ -1,31 +1,40 @@
-# src/factors/volume_factor.py
+# src/factors/rr_factor.py
 """
-成交量輔助乘數因子
-- 純函式，邏輯與拆分前的 analyzer.py 完全相同，只是搬移位置
-- 注意：這是「乘數」，不是獨立計分因子，不納入 factor_scores 平均計算，
-  而是在 analyzer.py 算完平均分之後，額外乘上這個係數
+RR值（風險報酬比）計分因子
 """
 
-import pandas as pd
 from typing import Dict
 
 
-def calculate_volume_multiplier(df: pd.DataFrame) -> Dict:
-    """
-    成交量輔助乘數：
-    - 若 當日成交量 > 近 20 日平均成交量 * 1.5 -> 1.2
-    - 否則 -> 1.0
+def calculate_rr_score(
+    current_price: float, 
+    support_price: float, 
+    target_price: float, 
+    lang: str = "zh"
+) -> Dict:
+    lang = "en" if lang.startswith("en") else "zh"
 
-    :return: {"multiplier": float, "detail": str}
-    """
-    if len(df) < 21:
-        return {"multiplier": 1.0, "detail": "資料不足20日，無法計算均量"}
+    upside = target_price - current_price
+    risk = current_price - support_price
 
-    latest_vol = df['volume'].iloc[-1]
-    ma20_vol = df['volume'].iloc[-21:-1].mean()  # 排除當日，取前 20 日均量
+    if risk <= 0:
+        err_msg = "支撐價計算異常，無法計算RR值" if lang == "zh" else "Invalid support price; R/R calculation failed"
+        return {"score": 0.0, "usable": False, "detail": err_msg}
 
-    if ma20_vol > 0 and latest_vol > ma20_vol * 1.5:
-        ratio = latest_vol / ma20_vol
-        return {"multiplier": 1.2, "detail": f"當日量達20日均量{ratio:.1f}倍（放量），分數×1.2"}
+    rr_ratio = upside / risk
 
-    return {"multiplier": 1.0, "detail": "成交量未出現放大訊號（未越過1.5倍均量）"}
+    if rr_ratio >= 5.0:
+        score = 5.0
+    elif rr_ratio >= 3.0:
+        score = 3.0
+    elif rr_ratio >= 2.0:
+        score = 1.0
+    else:
+        score = 0.0
+
+    if lang == "zh":
+        detail = f"RR值 1:{rr_ratio:.2f}，獲得{score:+.0f}分" if score > 0 else f"RR值 1:{rr_ratio:.2f}"
+    else:
+        detail = f"R/R Ratio 1:{rr_ratio:.2f}, Score: {score:+.0f} pts" if score > 0 else f"R/R Ratio 1:{rr_ratio:.2f}"
+
+    return {"score": score, "usable": True, "detail": detail}
