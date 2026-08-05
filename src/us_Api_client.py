@@ -1,5 +1,5 @@
-# src/Api_client.py
 import os
+import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import pandas as pd
@@ -22,6 +22,13 @@ news_client = None
 if ALPACA_API_KEY and ALPACA_SECRET_KEY:
     stock_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
     news_client = NewsClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+
+
+# -------------------------------------------------------------------
+# 全域快取設定 (In-Memory Cache)
+# -------------------------------------------------------------------
+TARGET_PRICE_CACHE = {}
+TARGET_PRICE_CACHE_TTL = 3600  # 快取過期時間設定為 1 小時 (3600 秒)
 
 
 # -------------------------------------------------------------------
@@ -112,9 +119,6 @@ def fetch_yfinance_bars(symbol: str, days: int = 120) -> pd.DataFrame:
 
     df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
 
-    # 【修正】yfinance 常見怪癖：若請求區間包含「今天」，最後一筆常常是尚未完整收盤的
-    # 殘缺列（close為NaN），會導致下游RR值計算出現 nan > 0 = False 這種隱藏陷阱，
-    # 讓否決規則誤判成「風報比僅1:0.00」。這裡直接丟棄任何價格欄位為NaN的列。
     df = df.dropna(subset=['open', 'high', 'low', 'close']).reset_index(drop=True)
 
     if df.empty:
@@ -234,52 +238,65 @@ def fetch_stock_news(symbol: str, limit: int = 5, source: str = 'alpaca') -> lis
 
 
 # -------------------------------------------------------------------
-# 3. 分析師目標價抓取 (單軌限制：僅支援 yfinance)
+# 3. 分析師目標價抓取 (含 In-Memory 快取防護機制)
 # -------------------------------------------------------------------
 
 def fetch_analyst_target_price(symbol: str, source: str = 'yfinance') -> dict:
     """
-    抓取分析師目標價。
-    【重要架構限制】此功能為單軌設計。Alpaca 官方 Market Data API 未提供分析師目標價。
+    抓取分析師目標價 (含快取機制，避免 Render 觸發 429 限制)。
     """
+    symbol_upper = symbol.upper()
+    current_time = time.time()
+
+    # 1. 檢查快取
+    if symbol_upper in TARGET_PRICE_CACHE:
+        cached_data, cached_at = TARGET_PRICE_CACHE[symbol_upper]
+        if current_time - cached_at < TARGET_PRICE_CACHE_TTL:
+            return cached_data
+
     if source.lower() != 'yfinance':
         print(f"⚠️ 提示：Alpaca API 不支援目標價數據，自動切換至 yfinance 進行抓取。")
 
-    ticker = yf.Ticker(symbol)
-    info = ticker.info
+    try:
+        ticker = yf.Ticker(symbol_upper)
+        info = ticker.info
 
-    target_mean = info.get("targetMeanPrice", None)
-    target_high = info.get("targetHighPrice", None)
-    target_low = info.get("targetLowPrice", None)
+        target_mean = info.get("targetMeanPrice", None)
+        target_high = info.get("targetHighPrice", None)
+        target_low = info.get("targetLowPrice", None)
 
-    return {
-        "target_mean": round(target_mean, 2) if isinstance(target_mean, (int, float)) else None,
-        "target_high": round(target_high, 2) if isinstance(target_high, (int, float)) else None,
-        "target_low": round(target_low, 2) if isinstance(target_low, (int, float)) else None,
-        "source": "yfinance"
-    }
+        result = {
+            "target_mean": round(target_mean, 2) if isinstance(target_mean, (int, float)) else None,
+            "target_high": round(target_high, 2) if isinstance(target_high, (int, float)) else None,
+            "target_low": round(target_low, 2) if isinstance(target_low, (int, float)) else None,
+            "source": "yfinance"
+        }
+
+        # 寫入快取
+        TARGET_PRICE_CACHE[symbol_upper] = (result, current_time)
+        return result
+
+    except Exception as e:
+        print(f"⚠️ 分析師目標價抓取失敗或遭受請求限制 ({e})")
+        # 降級保護：若抓取失敗，但快取中有過期資料，則繼續沿用舊資料
+        if symbol_upper in TARGET_PRICE_CACHE:
+            return TARGET_PRICE_CACHE[symbol_upper][0]
+
+        return {
+            "target_mean": None,
+            "target_high": None,
+            "target_low": None,
+            "source": "yfinance"
+        }
 
 
 # -------------------------------------------------------------------
-# 4. 【新增】Put/Call Ratio 選擇權比率抓取 (單軌：yfinance)
-# -------------------------------------------------------------------
-
-# -------------------------------------------------------------------
-# 4. 【修改】Put/Call Ratio 選擇權比率抓取 (單軌：yfinance，改採當日成交量 Volume)
+# 4. Put/Call Ratio 選擇權比率抓取 (單軌：yfinance)
 # -------------------------------------------------------------------
 
 def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfinance') -> dict:
     """
-    抓取選擇權鏈資料，計算 Put/Call Ratio（改以當日成交量 Volume 計算）。
-
-    到期日選擇邏輯：優先選擇「距今 >= min_days_out 天」中最近的一個到期日，
-    避免抓到臨近到期、波動劇烈失真的合約。若找不到符合條件的到期日，
-    則退而求其次，使用該股票可取得的最遠到期日。
-
-    :param symbol: 股票代號
-    :param min_days_out: 最少要距今幾天後到期 (預設 3 天)
-    :param source: 目前僅支援 'yfinance'
-    :return: {"put_call_ratio": float, "expiration": str, "usable": bool, "detail": str}
+    抓取選擇權鏈資料，計算 Put/Call Ratio（以當日成交量 Volume 計算）。
     """
     if source.lower() != 'yfinance':
         print("⚠️ 提示：Put/Call Ratio 目前僅支援 yfinance，自動切換。")
@@ -287,7 +304,7 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
     ticker = yf.Ticker(symbol)
 
     try:
-        available_dates = ticker.options  # 回傳字串日期 tuple
+        available_dates = ticker.options
     except Exception as e:
         return {"put_call_ratio": None, "expiration": None, "usable": False,
                 "detail": f"無法取得選擇權到期日清單 ({e})"}
@@ -304,13 +321,11 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
             target_date = date_str
             break
 
-    # 找不到 >= min_days_out 天後的到期日，退而求其次選最遠的一個
     if target_date is None:
         target_date = available_dates[-1]
 
     try:
         chain = ticker.option_chain(target_date)
-        # 關鍵修改：將 openInterest 替換為 volume（當日成交量）
         call_vol = chain.calls['volume'].fillna(0).sum()
         put_vol = chain.puts['volume'].fillna(0).sum()
     except Exception as e:
@@ -331,6 +346,7 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
         "detail": f"依據 {target_date} 到期選擇權鏈計算（當日成交量）"
     }
 
+
 def fetch_stock_name(symbol: str) -> dict:
     """
     取得股票基本資訊（包含公司名稱）
@@ -338,11 +354,11 @@ def fetch_stock_name(symbol: str) -> dict:
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info
-        # 優先取 longName，若無則取 shortName，再無則 Fallback 回 symbol
         stock_name = info.get("longName") or info.get("shortName") or symbol
         return {"symbol": symbol, "stock_name": stock_name}
     except Exception:
         return {"symbol": symbol, "stock_name": symbol}
+
 
 # ===================================================================
 # 測試區塊
