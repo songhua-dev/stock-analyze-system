@@ -1,40 +1,41 @@
-# src/factors/rr_factor.py
+# src/factors/volume_factor.py
 """
-RR值（風險報酬比）計分因子
+成交量倍數計分因子
 """
 
+import pandas as pd
 from typing import Dict
 
 
-def calculate_rr_score(
-    current_price: float, 
-    support_price: float, 
-    target_price: float, 
-    lang: str = "zh"
-) -> Dict:
+def calculate_volume_multiplier(df: pd.DataFrame, lang: str = "zh") -> Dict:
+    """
+    計算成交量乘數（放量判斷）
+    """
     lang = "en" if lang.startswith("en") else "zh"
 
-    upside = target_price - current_price
-    risk = current_price - support_price
+    if len(df) < 21:
+        err_msg = (
+            "資料不足20日，無法計算均量"
+            if lang == "zh"
+            else "Insufficient data (<20 days) for volume MA"
+        )
+        return {"multiplier": 1.0, "detail": err_msg}
 
-    if risk <= 0:
-        err_msg = "支撐價計算異常，無法計算RR值" if lang == "zh" else "Invalid support price; R/R calculation failed"
-        return {"score": 0.0, "usable": False, "detail": err_msg}
+    latest_vol = df["volume"].iloc[-1]
+    ma20_vol = df["volume"].iloc[-21:-1].mean()
 
-    rr_ratio = upside / risk
+    if ma20_vol > 0 and latest_vol > ma20_vol * 1.5:
+        ratio = latest_vol / ma20_vol
+        detail = (
+            f"當日量達20日均量{ratio:.1f}倍（放量），分數×1.2"
+            if lang == "zh"
+            else f"Volume reached {ratio:.1f}x 20-day MA (Volume Spike), score x1.2"
+        )
+        return {"multiplier": 1.2, "detail": detail}
 
-    if rr_ratio >= 5.0:
-        score = 5.0
-    elif rr_ratio >= 3.0:
-        score = 3.0
-    elif rr_ratio >= 2.0:
-        score = 1.0
-    else:
-        score = 0.0
-
-    if lang == "zh":
-        detail = f"RR值 1:{rr_ratio:.2f}，獲得{score:+.0f}分" if score > 0 else f"RR值 1:{rr_ratio:.2f}"
-    else:
-        detail = f"R/R Ratio 1:{rr_ratio:.2f}, Score: {score:+.0f} pts" if score > 0 else f"R/R Ratio 1:{rr_ratio:.2f}"
-
-    return {"score": score, "usable": True, "detail": detail}
+    no_spike_msg = (
+        "成交量未出現放大訊號（未越過1.5倍均量）"
+        if lang == "zh"
+        else "No volume surge detected (<1.5x 20-day MA)"
+    )
+    return {"multiplier": 1.0, "detail": no_spike_msg}
