@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="appTitle">股票分析工具</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+</head>
+<body class="bg-light">
+
+<div class="container py-4">
+
+    <!-- 頂部區塊：標題與右上角 i18n 語系選擇器 -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="m-0" data-i18n="mainTitle">股票分析工具</h1>
+        <div>
+            <select id="langSelect" class="form-select form-select-sm" style="width: auto;">
+                <option value="zh">繁體中文</option>
+                <option value="en" selected>English</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- 市場選擇頁籤 (Nav Tabs) -->
+    <ul class="nav nav-tabs mb-4" id="marketTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="us-tab" data-bs-toggle="tab" data-bs-target="#us-market" type="button" role="tab" data-i18n="tabUS">美股 (US)</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tw-tab" data-bs-toggle="tab" data-bs-target="#tw-market" type="button" role="tab" data-i18n="tabTW">台股 (TW)</button>
+        </li>
+    </ul>
+
+    <!-- 頁籤內容區域 -->
+    <div class="tab-content" id="marketTabContent">
+        
+        <!-- 美股頁籤內容 -->
+        <div class="tab-pane fade show active" id="us-market" role="tabpanel">
+            <div class="row g-3 mb-4">
+                <!-- 左欄：搜尋表單 -->
+                <div class="col-12 col-md-6">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="symbolInput" class="form-label"><strong data-i18n="labelSymbol">股票代號</strong></label>
+                                <input type="text" class="form-control" id="symbolInput" placeholder="例如：PLTR" data-i18n-placeholder="symbolPlaceholder" autocomplete="off">
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label d-block" data-i18n="labelSource">資料來源</label>
+                                <div class="btn-group" role="group">
+                                    <input type="radio" class="btn-check" name="sourceRadio" id="sourceYfinance" value="yfinance" checked>
+                                    <label class="btn btn-outline-secondary btn-sm" for="sourceYfinance">yfinance</label>
+
+                                    <input type="radio" class="btn-check" name="sourceRadio" id="sourceAlpaca" value="alpaca">
+                                    <label class="btn btn-outline-secondary btn-sm" for="sourceAlpaca">Alpaca</label>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label d-block"><strong data-i18n="labelFactors">分析因子（可複選）</strong></label>
+
+                                <div class="form-check">
+                                    <input class="form-check-input factor-checkbox" type="checkbox" value="rr" id="factorRR">
+                                    <label class="form-check-label" for="factorRR" data-i18n="factorRR">RR值分析</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input factor-checkbox" type="checkbox" value="news" id="factorNews">
+                                    <label class="form-check-label" for="factorNews" data-i18n="factorNews">新聞情緒分析（會呼叫LLM，較慢）</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input factor-checkbox" type="checkbox" value="put_call" id="factorPutCall">
+                                    <label class="form-check-label" for="factorPutCall" data-i18n="factorPutCall">Put/Call比率分析</label>
+                                </div>
+                            </div>
+
+                            <div id="validationAlert" class="alert alert-warning d-none" role="alert" data-i18n="validationAlert">
+                                請至少選擇一種分析因子
+                            </div>
+
+                            <button id="analyzeBtn" class="btn btn-primary w-100"><strong data-i18n="btnAnalyze">開始分析</strong></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右欄：選擇結果顯示區 -->
+                <div class="col-12 col-md-6">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-white fw-bold" data-i18n="headerSelection">
+                            選擇結果顯示區
+                        </div>
+                        <div class="card-body d-flex align-items-center justify-content-center" id="summaryDisplayArea">
+                            <span class="text-muted" id="placeholderText" data-i18n="placeholderText">等待選擇搜尋條件</span>
+                            <div id="summaryContent" class="d-none w-100 fw-normal"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 台股頁籤內容（預留接口） -->
+        <div class="tab-pane fade" id="tw-market" role="tabpanel">
+            <div class="card shadow-sm p-4 text-center">
+                <h5 class="text-muted mb-0" data-i18n="twMarketPlaceholder">台股分析模組開發中，敬請期待！</h5>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 下方區域：載入中、錯誤訊息與分析結果呈現 -->
+
+    <div id="loadingIndicator" class="text-center d-none mb-4">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-muted" data-i18n="loadingText">分析中，若有勾選新聞情緒分析可能需要多等幾秒...</p>
+    </div>
+
+    <div id="errorAlert" class="alert alert-danger d-none" role="alert"></div>
+
+    <div id="resultCard" class="card shadow-sm d-none">
+        <div class="card-body">
+            <h4 id="resultDecision" class="card-title"></h4>
+            <p id="resultReason" class="card-text text-muted"></p>
+
+            <div id="resultWarning" class="alert alert-warning d-none"></div>
+
+            <hr>
+
+            <h6><strong data-i18n="headerFactorDetails">因子明細</strong></h6>
+            <ul id="resultFactorLines" class="list-group list-group-flush"></ul>
+        </div>
+    </div>
+
+</div>
+
+<script>
+const i18n = {
+    zh: {
+        appTitle: "股票分析工具",
+        mainTitle: "股票分析工具",
+        tabUS: "美股 (US)",
+        tabTW: "台股 (TW)",
+        labelSymbol: "股票代號",
+        symbolPlaceholder: "例如：PLTR",
+        labelSource: "資料來源",
+        labelFactors: "分析因子（可複選）",
+        factorRR: "RR值分析",
+        factorNews: "新聞情緒分析（會呼叫LLM，較慢）",
+        factorPutCall: "Put/Call比率分析",
+        factorRR_short: "RR值分析",
+        factorNews_short: "新聞情緒分析",
+        factorPutCall_short: "Put/Call比率分析",
+        validationAlert: "請至少選擇一種分析因子",
+        btnAnalyze: "開始分析",
+        headerSelection: "選擇結果顯示區",
+        placeholderText: "等待選擇搜尋條件",
+        loadingText: "分析中，若有勾選新聞情緒分析可能需要多等幾秒...",
+        headerFactorDetails: "因子明細",
+        emptyFactors: "（無因子明細，可能觸發否決規則）",
+        errSymbolEmpty: "請輸入股票代號",
+        errDefault: "分析失敗，請稍後再試",
+        lblStockSymbol: "股票代碼：",
+        lblStockName: "股票名稱：",
+        lblAnalysisFactors: "分析因子：",
+        twMarketPlaceholder: "台股分析模組開發中，敬請期待！"
+    },
+    en: {
+        appTitle: "Stock Analysis Tool",
+        mainTitle: "Stock Analysis Tool",
+        tabUS: "US Stocks",
+        tabTW: "TW Stocks",
+        labelSymbol: "Ticker Symbol",
+        symbolPlaceholder: "e.g. PLTR",
+        labelSource: "Data Source",
+        labelFactors: "Analysis Factors (Multiple)",
+        factorRR: "Risk-Reward (RR) Analysis",
+        factorNews: "News Sentiment (LLM, slower)",
+        factorPutCall: "Put/Call Ratio Analysis",
+        factorRR_short: "RR Analysis",
+        factorNews_short: "News Sentiment",
+        factorPutCall_short: "Put/Call Ratio",
+        validationAlert: "Please select at least one analysis factor.",
+        btnAnalyze: "Start Analysis",
+        headerSelection: "Selected Criteria Summary",
+        placeholderText: "Awaiting selection criteria...",
+        loadingText: "Analyzing... News sentiment analysis may take a few seconds.",
+        headerFactorDetails: "Factor Breakdown",
+        emptyFactors: "(No details available, veto rule may have triggered)",
+        errSymbolEmpty: "Please enter a ticker symbol.",
+        errDefault: "Analysis failed, please try again later.",
+        lblStockSymbol: "Ticker Symbol: ",
+        lblStockName: "Company Name: ",
+        lblAnalysisFactors: "Factors: ",
+        twMarketPlaceholder: "Taiwan Stock Analysis Module Under Development!"
+    }
+};
+
+let currentLang = 'en';
+
+const langSelect = document.getElementById('langSelect');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const symbolInput = document.getElementById('symbolInput');
+const validationAlert = document.getElementById('validationAlert');
+const loadingIndicator = document.getElementById('loadingIndicator');
+const errorAlert = document.getElementById('errorAlert');
+const resultCard = document.getElementById('resultCard');
+const resultDecision = document.getElementById('resultDecision');
+const resultReason = document.getElementById('resultReason');
+const resultWarning = document.getElementById('resultWarning');
+const resultFactorLines = document.getElementById('resultFactorLines');
+
+const placeholderText = document.getElementById('placeholderText');
+const summaryContent = document.getElementById('summaryContent');
+
+function updateLanguage(lang) {
+    currentLang = lang;
+    const t = i18n[lang];
+
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (t[key]) el.textContent = t[key];
+    });
+
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        if (t[key]) el.placeholder = t[key];
+    });
+
+    if (window.lastAnalysisData) {
+        renderSummary(window.lastAnalysisData);
+    }
+}
+
+function getCheckedFactors() {
+    const checkboxes = document.querySelectorAll('.factor-checkbox:checked');
+    const t = i18n[currentLang];
+    
+    return Array.from(checkboxes).map(cb => {
+        let nameKey = '';
+        if (cb.value === 'rr') nameKey = 'factorRR_short';
+        else if (cb.value === 'news') nameKey = 'factorNews_short';
+        else if (cb.value === 'put_call') nameKey = 'factorPutCall_short';
+        else nameKey = cb.value;
+
+        return {
+            value: cb.value,
+            name: t[nameKey] || cb.value
+        };
+    });
+}
+
+function getSelectedSource() {
+    return document.querySelector('input[name="sourceRadio"]:checked').value;
+}
+
+function resetUI() {
+    validationAlert.classList.add('d-none');
+    errorAlert.classList.add('d-none');
+    resultCard.classList.add('d-none');
+    resultWarning.classList.add('d-none');
+}
+
+function renderSummary(data) {
+    const t = i18n[currentLang];
+    placeholderText.classList.add('d-none');
+    summaryContent.innerHTML = `<strong>${t.lblStockSymbol}</strong>${data.symbol}<br><strong>${t.lblStockName}</strong>${data.stockName}<br><strong>${t.lblAnalysisFactors}</strong>${data.factorNames}`;
+    summaryContent.classList.remove('d-none');
+}
+
+langSelect.addEventListener('change', (e) => {
+    updateLanguage(e.target.value);
+});
+
+analyzeBtn.addEventListener('click', async () => {
+    resetUI();
+    const t = i18n[currentLang];
+
+    const symbol = symbolInput.value.trim().toUpperCase();
+    if (!symbol) {
+        errorAlert.textContent = t.errSymbolEmpty;
+        errorAlert.classList.remove('d-none');
+        return;
+    }
+
+    const selectedFactorObjects = getCheckedFactors();
+    if (selectedFactorObjects.length === 0) {
+        validationAlert.classList.remove('d-none');
+        return;
+    }
+
+    const selectedFactorValues = selectedFactorObjects.map(f => f.value);
+    const selectedFactorNames = selectedFactorObjects.map(f => f.name).join(' + ');
+    const source = getSelectedSource();
+
+    loadingIndicator.classList.remove('d-none');
+    analyzeBtn.disabled = true;
+
+    try {
+        const params = new URLSearchParams({
+            market: 'us', // 預留市場切換接口，目前為美股
+            symbol: symbol,
+            factors: selectedFactorValues.join(','),
+            source: source
+        });
+
+        const response = await fetch(`/api/analyze?${params.toString()}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || t.errDefault);
+        }
+
+        const stockName = data.stock_name || symbol;
+        window.lastAnalysisData = {
+            symbol: symbol,
+            stockName: stockName,
+            factorNames: selectedFactorNames
+        };
+
+        renderSummary(window.lastAnalysisData);
+
+        resultDecision.textContent = data.decision;
+        resultReason.innerHTML = data.reason || '';
+
+        if (data.warning) {
+            resultWarning.textContent = data.warning;
+            resultWarning.classList.remove('d-none');
+        }
+
+        resultFactorLines.innerHTML = '';
+        if (data.factor_lines && data.factor_lines.length > 0) {
+            data.factor_lines.forEach(line => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item';
+                li.innerHTML = line;
+                resultFactorLines.appendChild(li);
+            });
+        } else {
+            const li = document.createElement('li');
+            li.className = 'list-group-item text-muted';
+            li.textContent = t.emptyFactors;
+            resultFactorLines.appendChild(li);
+        }
+
+        resultCard.classList.remove('d-none');
+
+    } catch (err) {
+        errorAlert.textContent = err.message;
+        errorAlert.classList.remove('d-none');
+    } finally {
+        loadingIndicator.classList.add('d-none');
+        analyzeBtn.disabled = false;
+    }
+});
+
+symbolInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') analyzeBtn.click();
+});
+
+updateLanguage('en');
+</script>
+
+</body>
+</html>
