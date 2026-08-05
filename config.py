@@ -5,16 +5,17 @@ from dotenv import load_dotenv
 # 載入 .env 檔案中的環境變數
 load_dotenv()
 
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+# 讀取環境變數，若找不到則預設為 "DEMO"
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "DEMO_KEY")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "DEMO_SECRET")
 ALPACA_ENDPOINT = os.getenv("ALPACA_ENDPOINT", "https://paper-api.alpaca.markets")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "DEMO_GROQ_KEY")
 
-# 基本檢查
-if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-    raise ValueError("未在 .env 中找到 Alpaca API Key 或 Secret Key，請檢查設定！")
-if not GROQ_API_KEY:
-    raise ValueError("未在 .env 中找到 Groq API Key，請檢查設定！")
+# 標示目前是否為 Demo 模式
+IS_DEMO_MODE = (ALPACA_API_KEY == "DEMO_KEY" or GROQ_API_KEY == "DEMO_GROQ_KEY")
+
+if IS_DEMO_MODE:
+    print("⚠️ 注意：目前處於 Demo 模式（未設定 Alpaca 或 Groq API Key）")
 
 # ===================================================================
 # 各因子基礎權重設定 (Base Weights)
