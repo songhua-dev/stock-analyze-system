@@ -134,15 +134,15 @@ Every factor module returns the same shape:
 {"score": float, "usable": bool, "detail": str}
 ```
 
-`usable=False` means the factor couldn't be evaluated this time (missing data, API failure) — it's excluded from the weighted average rather than counted as a neutral zero. To add a new one:
+`usable=False` means the factor couldn't be evaluated this time (missing data, API failure) — it's excluded from the weighted average rather than counted as a neutral zero. To add a new **weighted scoring factor**:
 
 1. Write a new file under `src/factors/` following this return shape.
 2. Add a weight for it in `config.py`'s `FACTOR_WEIGHTS`.
 3. Wire the toggle into `main.py` alongside the existing factors.
 
-`analyzer.py` itself needs no changes — it only consumes whatever `factor_results` dict it's handed.
+`analyzer.py`'s score-collection logic needs no changes for this case — it only consumes whatever `factor_results` dict it's handed. However, if the new factor also needs its own **veto condition** (a hard block, like the existing RR-ratio or insider-selling checks), that still requires adding a branch inside `analyzer.py`'s `check_veto_rules()` — veto logic is not yet abstracted into the same pluggable shape as scoring factors.
 
-> 中文摘要：每個因子模組統一回傳 `{score, usable, detail}`；`usable=False`代表這次無法判讀，不計入加權平均（不是當作0分）。新增因子只要三步：寫檔案、在config設權重、main.py接上開關，`analyzer.py`本身不用改。
+> 中文摘要：每個因子模組統一回傳 `{score, usable, detail}`；`usable=False`代表這次無法判讀，不計入加權平均（不是當作0分）。新增一般加減分因子只要三步：寫檔案、在config設權重、main.py接上開關，analyzer.py的分數收集邏輯不用改。但若新因子也需要自己的否決規則（像現有的RR值、內部人賣股這種硬性否決條件），仍需要進 analyzer.py 的 check_veto_rules() 裡加一段判斷——否決規則目前還沒抽象成跟計分因子一樣的可插拔格式。
 
 ---
 
