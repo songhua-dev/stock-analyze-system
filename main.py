@@ -24,10 +24,12 @@ from src.factors.news_factor import analyze_news_sentiment
 from src.factors.put_call_ratio_factor import calculate_put_call_ratio_score
 
 app = Flask(__name__)
-
 # 讀取環境變數 DEMO_MODE，預設為 False (本機開發時為全功能版)
 IS_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 
+@app.route('/ping', methods=['GET'])
+def ping():
+    return 'ok', 200
 
 @app.route("/", methods=["GET"])
 def index():
