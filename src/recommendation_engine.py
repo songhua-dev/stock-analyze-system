@@ -3,18 +3,28 @@
 from typing import Dict
 
 FACTOR_LABELS = {
-    "rr": "RR值",
-    "candlestick": "K線型態",
-    "news": "新聞情緒",
-    "put_call": "Put/Call"
+    "zh": {
+        "rr": "RR值",
+        "candlestick": "K線型態",
+        "news": "新聞情緒",
+        "put_call": "Put/Call"
+    },
+    "en": {
+        "rr": "RR Ratio",
+        "candlestick": "Candlestick",
+        "news": "News Sentiment",
+        "put_call": "Put/Call Ratio"
+    }
 }
 
 
-def format_analysis_output(analysis_result: Dict) -> Dict:
+def format_analysis_output(analysis_result: Dict, lang: str = "zh") -> Dict:
+    lang = "en" if lang.startswith("en") else "zh"
+    
     if analysis_result.get("status") == "error":
         return {
-            "decision": "無法分析",
-            "reason": analysis_result.get("reason", "未知錯誤"),
+            "decision": "無法分析" if lang == "zh" else "Analysis Failed",
+            "reason": analysis_result.get("reason", "未知錯誤" if lang == "zh" else "Unknown Error"),
             "score": None,
             "factor_lines": [],
             "warning": None
@@ -24,27 +34,35 @@ def format_analysis_output(analysis_result: Dict) -> Dict:
     factor_details = details.get("factor_details", {})
     factor_scores = details.get("factor_scores", {})
 
-    # 需求 3 & 4：組裝因子明細並補上得分標示（加上 <strong> 粗體標籤）
+    labels = FACTOR_LABELS.get(lang, FACTOR_LABELS["zh"])
+
     factor_lines = []
     for key, detail in factor_details.items():
-        label = FACTOR_LABELS.get(key, key)
+        label = labels.get(key, key)
         score = factor_scores.get(key)
         
-        # 格式化得分顯示 (+1分, -2分, 0分)
         if score is not None:
-            score_str = f"+{score}分" if score > 0 else f"{score}分"
-            factor_lines.append(f"<strong>{label}：</strong>{detail}（獲得 {score_str}）")
+            if lang == "zh":
+                score_str = f"+{score}分" if score > 0 else f"{score}分"
+                factor_lines.append(f"<strong>{label}：</strong>{detail}（獲得 {score_str}）")
+            else:
+                score_str = f"+{score} pts" if score > 0 else f"{score} pts"
+                factor_lines.append(f"<strong>{label}: </strong>{detail} ({score_str})")
         else:
-            factor_lines.append(f"<strong>{label}：</strong>{detail}")
+            factor_lines.append(f"<strong>{label}：</strong>{detail}" if lang == "zh" else f"<strong>{label}: </strong>{detail}")
 
     volume_detail = details.get("volume_detail")
     if volume_detail:
-        factor_lines.append(f"<strong>成交量：</strong>{volume_detail}")
+        vol_label = "成交量：" if lang == "zh" else "Volume: "
+        factor_lines.append(f"<strong>{vol_label}</strong>{volume_detail}")
 
-    # 需求 1：修改頂部建議顯示格式
     final_score = analysis_result.get("final_score")
     decision_text = analysis_result["decision"]
-    display_decision = f"{decision_text}（平均 {final_score}分）" if final_score is not None else decision_text
+    
+    if final_score is not None:
+        display_decision = f"{decision_text}（平均 {final_score}分）" if lang == "zh" else f"{decision_text} (Avg. {final_score} pts)"
+    else:
+        display_decision = decision_text
 
     return {
         "decision": display_decision,

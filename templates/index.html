@@ -206,8 +206,6 @@ const i18n = {
     }
 };
 
-let currentLang = 'en';
-
 const langSelect = document.getElementById('langSelect');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const symbolInput = document.getElementById('symbolInput');
@@ -223,8 +221,13 @@ const resultFactorLines = document.getElementById('resultFactorLines');
 const placeholderText = document.getElementById('placeholderText');
 const summaryContent = document.getElementById('summaryContent');
 
+// 優先從 localStorage 讀取偏好語言，無偏好則預設為 'en'
+let currentLang = localStorage.getItem('appLang') || 'en';
+langSelect.value = currentLang;
+
 function updateLanguage(lang) {
     currentLang = lang;
+    localStorage.setItem('appLang', lang);
     const t = i18n[lang];
 
     document.querySelectorAll('[data-i18n]').forEach(el => {
@@ -311,7 +314,8 @@ analyzeBtn.addEventListener('click', async () => {
             market: 'us',
             symbol: symbol,
             factors: selectedFactorValues.join(','),
-            source: source
+            source: source,
+            lang: currentLang // 帶入目前選擇的語言參數傳給後端
         });
 
         const response = await fetch(`/api/analyze?${params.toString()}`);
@@ -368,7 +372,8 @@ symbolInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') analyzeBtn.click();
 });
 
-updateLanguage('en');
+// 初始化載入偏好語言
+updateLanguage(currentLang);
 </script>
 
 </body>

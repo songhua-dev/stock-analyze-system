@@ -41,10 +41,13 @@ def index():
 @app.route("/api/analyze", methods=["GET"])
 def analyze_route():
     """
-    範例請求：/api/analyze?market=us&symbol=PLTR&factors=rr,news
+    範例請求：/api/analyze?market=us&symbol=PLTR&factors=rr,news&lang=en
     """
     market = request.args.get("market", "us").lower().strip()
     raw_symbol = request.args.get("symbol", "")
+    
+    # 🔹 讀取前端傳來的語言參數（預設為 en）
+    lang = request.args.get("lang", "en").lower().strip()
 
     # -----------------------------------------------------------------
     # 全形轉半形 + 去空白 + 轉大寫 (解決手機全形輸入問題)
@@ -143,20 +146,21 @@ def analyze_route():
     except Exception:
         volume_result = {"multiplier": 1.0, "detail": ""}
 
-    # 第4步：算式整合與分析
+    # 🔹 第4步：算式整合與分析（帶入 lang 參數）
     try:
         analysis_result = analyze_stock(
             df=df,
             target_price_data=target_price_data,
             factor_results=factor_results,
             volume_result=volume_result,
-            insider_net_sell_ratio=None
+            insider_net_sell_ratio=None,
+            lang=lang
         )
     except Exception as e:
         return jsonify({"error": f"量化分析計算發生錯誤: {e}"}), 500
 
-    # 第5步：格式化輸出
-    formatted_output = format_analysis_output(analysis_result)
+    # 🔹 第5步：格式化輸出（帶入 lang 參數）
+    formatted_output = format_analysis_output(analysis_result, lang=lang)
     formatted_output["stock_name"] = stock_name
     return jsonify(formatted_output)
 
