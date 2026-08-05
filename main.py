@@ -133,9 +133,18 @@ def analyze_route():
         try:
             options_data = fetch_options_ratio(symbol, min_days_out=3)
             if options_data.get("usable"):
+                data_type = options_data.get("data_type", "")
+                
+                # 🔹 補齊 data_type 的多語系轉換
+                if not lang.startswith("zh"):
+                    if "成交量" in data_type:
+                        data_type = "Daily Volume"
+                    elif "未平倉" in data_type:
+                        data_type = "Open Interest"
+
                 factor_results["put_call"] = calculate_put_call_ratio_score(
                     options_data.get("put_call_ratio"), 
-                    options_data.get("data_type"),
+                    data_type,
                     lang=lang
                 )
         except Exception as e:
