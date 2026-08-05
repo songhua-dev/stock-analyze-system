@@ -1,11 +1,11 @@
-# src/main.py
+# main.py
 """
 Flask 主程式（路由層）
-包含市場參數 (market) 的分流預留接口：
-- market=us (預設美股處理流程)
-- market=tw (預留台股處理流程)
+包含市場參數 (market) 的分流預留接口與 Demo 模式開關控制：
+- IS_DEMO_MODE: 讀取環境變數 DEMO_MODE，控制線上展示版與本機全功能版。
 """
 
+import os
 from flask import Flask, request, jsonify, render_template
 
 from src.us_Api_client import (
@@ -25,11 +25,14 @@ from src.factors.put_call_ratio_factor import calculate_put_call_ratio_score
 
 app = Flask(__name__)
 
+# 讀取環境變數 DEMO_MODE，預設為 False (本機開發時為全功能版)
+IS_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+
 
 @app.route("/", methods=["GET"])
 def index():
-    """渲染前端主頁面 (templates/index.html)"""
-    return render_template("index.html")
+    """渲染前端主頁面，將 is_demo 狀態傳給 HTML"""
+    return render_template("index.html", is_demo=IS_DEMO_MODE)
 
 
 @app.route("/api/analyze", methods=["GET"])
@@ -47,14 +50,26 @@ def analyze_route():
     # 市場分流預留接口
     # -----------------------------------------------------------------
     if market == "tw":
-        # 未來台股專屬分析入口預留點
         return jsonify({"error": "台股 API 分析接口開發中"}), 501
 
     # 以下為美股 (market == "us") 的既有邏輯
     factors_param = request.args.get("factors", "")
     selected_factors = [f.strip() for f in factors_param.split(",") if f.strip()]
-
     data_source = request.args.get("source", "yfinance")
+
+    # -----------------------------------------------------------------
+    # 🛡️ Demo 模式安全防護（後端第二道防線）
+    # -----------------------------------------------------------------
+    if IS_DEMO_MODE:
+        if data_source == "alpaca":
+            return jsonify({
+                "error": "🔒 雲端 Demo 版暫不開放 Alpaca API 資料來源，請下載 GitHub 專案於本機執行。"
+            }), 400
+        if "news" in selected_factors:
+            return jsonify({
+                "error": "🔒 雲端 Demo 版暫不開放 LLM 新聞情緒分析，避免 API 額度耗盡。請下載 GitHub 專案於本機執行。"
+            }), 400
+
     stock_info = fetch_stock_name(symbol)
     stock_name = stock_info.get("stock_name", symbol)
 
@@ -109,4 +124,7 @@ def analyze_route():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # 自動相容本機開發 (port 5000) 與 Render 雲端環境 (環境變數 PORT)
+    port = int(os.getenv("PORT", 5000))
+    debug = not IS_DEMO_MODE
+    app.run(host="0.0.0.0", port=port, debug=debug)

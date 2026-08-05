@@ -53,8 +53,11 @@
                                     <input type="radio" class="btn-check" name="sourceRadio" id="sourceYfinance" value="yfinance" checked>
                                     <label class="btn btn-outline-secondary btn-sm" for="sourceYfinance">yfinance</label>
 
-                                    <input type="radio" class="btn-check" name="sourceRadio" id="sourceAlpaca" value="alpaca">
-                                    <label class="btn btn-outline-secondary btn-sm" for="sourceAlpaca">Alpaca</label>
+                                    <!-- 🔹 若為 Demo 模式，直接將 Alpaca 按鈕反灰（disabled） -->
+                                    <input type="radio" class="btn-check" name="sourceRadio" id="sourceAlpaca" value="alpaca" {% if is_demo %}disabled{% endif %}>
+                                    <label class="btn btn-outline-secondary btn-sm" for="sourceAlpaca">
+                                        Alpaca {% if is_demo %}<small class="text-danger">(Demo 版停用)</small>{% endif %}
+                                    </label>
                                 </div>
                             </div>
 
@@ -65,10 +68,16 @@
                                     <input class="form-check-input factor-checkbox" type="checkbox" value="rr" id="factorRR">
                                     <label class="form-check-label" for="factorRR" data-i18n="factorRR">RR值分析</label>
                                 </div>
+
+                                <!-- 🔹 若為 Demo 模式，直接將新聞情緒分析 Checkbox 反灰（disabled） -->
                                 <div class="form-check">
-                                    <input class="form-check-input factor-checkbox" type="checkbox" value="news" id="factorNews">
+                                    <input class="form-check-input factor-checkbox" type="checkbox" value="news" id="factorNews" {% if is_demo %}disabled{% endif %}>
                                     <label class="form-check-label" for="factorNews" data-i18n="factorNews">新聞情緒分析（會呼叫LLM，較慢）</label>
+                                    {% if is_demo %}
+                                    <div class="form-text text-danger" data-i18n="demoNotice">🔒 雲端 Demo 版暫不開放此功能，可下載原始碼於本機體驗</div>
+                                    {% endif %}
                                 </div>
+
                                 <div class="form-check">
                                     <input class="form-check-input factor-checkbox" type="checkbox" value="put_call" id="factorPutCall">
                                     <label class="form-check-label" for="factorPutCall" data-i18n="factorPutCall">Put/Call比率分析</label>
@@ -162,7 +171,8 @@ const i18n = {
         lblStockSymbol: "股票代碼：",
         lblStockName: "股票名稱：",
         lblAnalysisFactors: "分析因子：",
-        twMarketPlaceholder: "台股分析模組開發中，敬請期待！"
+        twMarketPlaceholder: "台股分析模組開發中，敬請期待！",
+        demoNotice: "🔒 雲端 Demo 版暫不開放此功能，可下載原始碼於本機體驗"
     },
     en: {
         appTitle: "Stock Analysis Tool",
@@ -191,7 +201,8 @@ const i18n = {
         lblStockSymbol: "Ticker Symbol: ",
         lblStockName: "Company Name: ",
         lblAnalysisFactors: "Factors: ",
-        twMarketPlaceholder: "Taiwan Stock Analysis Module Under Development!"
+        twMarketPlaceholder: "Taiwan Stock Analysis Module Under Development!",
+        demoNotice: "🔒 Restricted in Live Demo mode. Clone repository to run locally."
     }
 };
 
@@ -297,7 +308,7 @@ analyzeBtn.addEventListener('click', async () => {
 
     try {
         const params = new URLSearchParams({
-            market: 'us', // 預留市場切換接口，目前為美股
+            market: 'us',
             symbol: symbol,
             factors: selectedFactorValues.join(','),
             source: source
