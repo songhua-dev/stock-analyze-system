@@ -380,9 +380,15 @@ analyzeBtn.addEventListener('click', async () => {
             resultFactorLines.appendChild(li);
         }
 
-        if (data.entry_price) {
-            entryPriceDetail.textContent = data.entry_price.detail;
+        if (data.entry_price && data.entry_price.detail) {
+            // 呈現後端已組合完成的多語系 detail 文字，並在下方附上免責聲明
+            entryPriceDetail.innerHTML = `
+                <div>${data.entry_price.detail}</div>
+                <div class="form-text text-muted mt-1">${t.entryPriceDisclaimer}</div>
+            `;
             entryPriceCard.classList.remove('d-none');
+        } else {
+            entryPriceCard.classList.add('d-none');
         }
 
         resultCard.classList.remove('d-none');
