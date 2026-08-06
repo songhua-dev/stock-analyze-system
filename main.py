@@ -133,6 +133,10 @@ def analyze_route():
     # 若選取 RR 分析或算式分析需要，抓取分析師目標價
     try:
         target_price_data = fetch_analyst_target_price(symbol, source=data_source, lang=lang)
+    except ValueError as e:
+        if str(e) == "TARGET_PRICE_RATE_LIMITED":
+            # 🚨 直接中斷請求，傳回錯誤提示（比照無代碼/無因子阻斷機制）
+            return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
     except Exception as e:
         print(f"⚠️ 抓取目標價失敗/跳過: {e}")
 

@@ -280,11 +280,13 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
         return result
 
     except Exception as e:
+        err_str = str(e)
         print(t("WARN_TARGET_PRICE_FETCH_FAILED", lang, error=e))
         # 降級保護：若抓取失敗，但快取中有過期資料，則繼續沿用舊資料
         if symbol_upper in TARGET_PRICE_CACHE:
             return TARGET_PRICE_CACHE[symbol_upper][0]
-
+        if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
+            raise ValueError("TARGET_PRICE_RATE_LIMITED")
         return {
             "target_mean": None,
             "target_high": None,
