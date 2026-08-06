@@ -343,10 +343,12 @@ function resetUI() {
 function renderSummary(data) {
     const t = i18n[currentLang];
     placeholderText.classList.add('d-none');
+    const nameToDisplay = data.stock_name || data.stockName || data.symbol;
+    
     summaryContent.innerHTML = `
-        <strong id="summarySymbolLbl">${t.lblStockSymbol}</strong>${data.symbol}<br>
-        <strong id="summaryNameLbl">${t.lblStockName}</strong>${data.stockName}<br>
-        <strong id="summaryFactorLbl">${t.lblAnalysisFactors}</strong>${data.factorNames}
+        <div><strong>${t.lblStockSymbol}</strong> ${data.symbol}</div>
+        <div><strong>${t.lblStockName}</strong> ${nameToDisplay}</div>
+        <div><strong>${t.lblAnalysisFactors}</strong> ${data.factorNames}</div>
     `;
     summaryContent.classList.remove('d-none');
 }
