@@ -343,6 +343,7 @@ function resetUI() {
 function renderSummary(data) {
     const t = i18n[currentLang];
     placeholderText.classList.add('d-none');
+    // 相容 snake_case 與 camelCase 欄位
     const nameToDisplay = data.stock_name || data.stockName || data.symbol;
     
     summaryContent.innerHTML = `
@@ -528,8 +529,10 @@ analyzeBtn.addEventListener('click', async () => {
         const stockName = data.stock_name || symbol;
         currentAnalyzedSymbol = symbol;
 
+        // 儲存至暫存，同時相容 stockName 與 stock_name
         window.lastAnalysisData = {
             symbol: symbol,
+            stock_name: stockName,
             stockName: stockName,
             factorNames: selectedFactorNames
         };
@@ -537,7 +540,13 @@ analyzeBtn.addEventListener('click', async () => {
         renderSummary(window.lastAnalysisData);
         updateFavButtonState(symbol);
 
-        resultDecision.textContent = data.decision;
+        // 動態將公司名稱替換/呈現在分析結果卡片的標題中
+        if (data.stock_name && data.stock_name !== symbol) {
+            resultDecision.textContent = `[${data.stock_name}] ${data.decision.replace(`[${symbol}]`, '').trim()}`;
+        } else {
+            resultDecision.textContent = data.decision;
+        }
+
         resultReason.innerHTML = data.reason || '';
 
         if (data.warning) {
@@ -554,8 +563,7 @@ analyzeBtn.addEventListener('click', async () => {
                 resultFactorLines.appendChild(li);
             });
         } else {
-            const li = document.createElement('li');
-            li.className = 'list-group-item text-muted';
+            const li = document.className = 'list-group-item text-muted';
             li.textContent = t.emptyFactors;
             resultFactorLines.appendChild(li);
         }
