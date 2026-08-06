@@ -6,6 +6,18 @@
 <title data-i18n="appTitle">股票分析工具</title>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<style>
+    .card { 
+        border-radius: 12px; 
+        border: none; 
+    }
+    .btn-group .btn { 
+        border-radius: 8px !important; 
+    }
+    #favoritesList .btn-group { 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
+    }
+</style>
 </head>
 <body class="bg-light">
 
@@ -38,9 +50,9 @@
         <!-- 美股頁籤內容 -->
         <div class="tab-pane fade show active" id="us-market" role="tabpanel">
             <div class="row g-3 mb-4">
-                <!-- 左欄：搜尋表單 -->
+                <!-- 左欄：搜尋表單與我的最愛 -->
                 <div class="col-12 col-md-6">
-                    <div class="card shadow-sm h-100">
+                    <div class="card shadow-sm mb-3">
                         <div class="card-body">
                             <div class="mb-3">
                                 <label for="symbolInput" class="form-label"><strong data-i18n="labelSymbol">股票代號</strong></label>
@@ -91,13 +103,27 @@
                             <button id="analyzeBtn" class="btn btn-primary w-100"><strong data-i18n="btnAnalyze">開始分析</strong></button>
                         </div>
                     </div>
+
+                    <!-- 我的最愛區域 -->
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h6 class="card-title fw-bold mb-3" data-i18n="FAVORITES_TITLE">我的最愛</h6>
+                            <div id="favoritesList" class="d-flex flex-wrap gap-2">
+                                <!-- 動態渲染最愛標籤 -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 右欄：選擇結果顯示區 -->
                 <div class="col-12 col-md-6">
                     <div class="card shadow-sm h-100">
-                        <div class="card-header bg-white fw-bold" data-i18n="headerSelection">
-                            選擇結果顯示區
+                        <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+                            <span data-i18n="headerSelection">選擇結果顯示區</span>
+                            <!-- 加入/移除我的最愛按鈕 -->
+                            <button id="toggleFavBtn" class="btn btn-outline-warning btn-sm d-none" onclick="toggleCurrentFavorite()">
+                                <span id="favBtnText" data-i18n="ADD_TO_FAVORITES">⭐ 加入最愛</span>
+                            </button>
                         </div>
                         <div class="card-body d-flex align-items-center justify-content-center" id="summaryDisplayArea">
                             <span class="text-muted" id="placeholderText" data-i18n="placeholderText">等待選擇搜尋條件</span>
@@ -181,7 +207,12 @@ const i18n = {
         lblStockName: "股票名稱：",
         lblAnalysisFactors: "分析因子：",
         twMarketPlaceholder: "台股分析模組開發中，敬請期待！",
-        demoNotice: "🔒 雲端 Demo 版暫不開放此功能，可下載原始碼於本機體驗"
+        demoNotice: "🔒 雲端 Demo 版暫不開放此功能，可下載原始碼於本機體驗",
+        FAVORITES_TITLE: "我的最愛",
+        ADD_TO_FAVORITES: "⭐ 加入最愛",
+        REMOVE_FROM_FAVORITES: "★ 已在最愛 (點擊移除)",
+        NO_FAVORITES_YET: "尚未建立最愛清單",
+        HISTORY_TITLE: "歷史查詢紀錄"
     },
     en: {
         appTitle: "Stock Analysis Tool",
@@ -215,7 +246,12 @@ const i18n = {
         lblStockName: "Company Name: ",
         lblAnalysisFactors: "Factors: ",
         twMarketPlaceholder: "Taiwan Stock Analysis Module Under Development!",
-        demoNotice: "🔒 Restricted in Live Demo mode. Clone repository to run locally."
+        demoNotice: "🔒 Restricted in Live Demo mode. Clone repository to run locally.",
+        FAVORITES_TITLE: "Favorites",
+        ADD_TO_FAVORITES: "⭐ Add to Favorites",
+        REMOVE_FROM_FAVORITES: "★ Favorited (Click to remove)",
+        NO_FAVORITES_YET: "No favorites added yet.",
+        HISTORY_TITLE: "Analysis History"
     }
 };
 
@@ -235,6 +271,12 @@ const entryPriceDetail = document.getElementById('entryPriceDetail');
 
 const placeholderText = document.getElementById('placeholderText');
 const summaryContent = document.getElementById('summaryContent');
+const toggleFavBtn = document.getElementById('toggleFavBtn');
+const favBtnText = document.getElementById('favBtnText');
+const favoritesList = document.getElementById('favoritesList');
+
+// 當前分析成功標的暫存
+let currentAnalyzedSymbol = "";
 
 // 優先從 localStorage 讀取偏好語言，無偏好則預設為 'en'
 let currentLang = localStorage.getItem('appLang') || 'en';
@@ -260,6 +302,11 @@ function updateLanguage(lang) {
         const selectedObjects = getCheckedFactors();
         window.lastAnalysisData.factorNames = selectedObjects.map(f => f.name).join(' + ');
         renderSummary(window.lastAnalysisData);
+    }
+
+    renderFavorites();
+    if (currentAnalyzedSymbol) {
+        updateFavButtonState(currentAnalyzedSymbol);
     }
 }
 
@@ -303,6 +350,134 @@ function renderSummary(data) {
     `;
     summaryContent.classList.remove('d-none');
 }
+
+/* ================= 我的最愛 (localStorage) 相關邏輯 ================= */
+
+function getFavorites() {
+    return JSON.parse(localStorage.getItem("stock_favorites") || "{}");
+}
+
+function saveFavoritesData(favs) {
+    localStorage.setItem("stock_favorites", JSON.stringify(favs));
+    renderFavorites();
+    if (currentAnalyzedSymbol) {
+        updateFavButtonState(currentAnalyzedSymbol);
+    }
+}
+
+function renderFavorites() {
+    const favs = getFavorites();
+    const t = i18n[currentLang];
+    favoritesList.innerHTML = "";
+
+    const keys = Object.keys(favs);
+    if (keys.length === 0) {
+        favoritesList.innerHTML = `<small class="text-muted">${t.NO_FAVORITES_YET}</small>`;
+        return;
+    }
+
+    keys.forEach(symbol => {
+        const btnGroup = document.createElement("div");
+        btnGroup.className = "btn-group btn-group-sm me-1 mb-1";
+        btnGroup.innerHTML = `
+            <button type="button" class="btn btn-outline-primary" onclick="quickAnalyze('${symbol}')">
+                📌 ${symbol}
+            </button>
+            <button type="button" class="btn btn-outline-danger" onclick="removeFavorite('${symbol}')">
+                ✕
+            </button>
+        `;
+        favoritesList.appendChild(btnGroup);
+    });
+}
+
+function quickAnalyze(symbol) {
+    const favs = getFavorites();
+    const item = favs[symbol];
+    if (!item) return;
+
+    symbolInput.value = symbol;
+
+    const factorCheckboxes = document.querySelectorAll(".factor-checkbox");
+    factorCheckboxes.forEach(cb => {
+        // 如果該 Checkbox 未被停用，依照紀錄進行勾選
+        if (!cb.disabled) {
+            cb.checked = item.factors.includes(cb.value);
+        }
+    });
+
+    analyzeBtn.click();
+}
+
+function toggleCurrentFavorite() {
+    if (!currentAnalyzedSymbol) return;
+
+    const favs = getFavorites();
+    if (favs[currentAnalyzedSymbol]) {
+        delete favs[currentAnalyzedSymbol];
+    } else {
+        const selectedFactorValues = getCheckedFactors().map(f => f.value);
+        favs[currentAnalyzedSymbol] = {
+            market: 'us',
+            factors: selectedFactorValues
+        };
+    }
+    saveFavoritesData(favs);
+}
+
+function removeFavorite(symbol) {
+    const favs = getFavorites();
+    if (favs[symbol]) {
+        delete favs[symbol];
+        saveFavoritesData(favs);
+    }
+}
+
+function updateFavButtonState(symbol) {
+    const favs = getFavorites();
+    const t = i18n[currentLang];
+
+    toggleFavBtn.classList.remove('d-none');
+    if (favs[symbol]) {
+        favBtnText.textContent = t.REMOVE_FROM_FAVORITES;
+        toggleFavBtn.classList.replace('btn-outline-warning', 'btn-warning');
+    } else {
+        favBtnText.textContent = t.ADD_TO_FAVORITES;
+        toggleFavBtn.classList.replace('btn-warning', 'btn-outline-warning');
+    }
+}
+
+/* ================= 背景靜默歷史快照 (localStorage) ================= */
+
+function saveAnalysisSnapshot(symbol, resultData, selectedFactors) {
+    try {
+        const history = JSON.parse(localStorage.getItem("analysis_history") || "[]");
+
+        const snapshot = {
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            symbol: symbol,
+            current_price: resultData.current_price || null,
+            decision: resultData.decision || "",
+            total_score: resultData.final_score || null,
+            factors_used: selectedFactors,
+            factor_lines: resultData.factor_lines || []
+        };
+
+        history.push(snapshot);
+
+        // 限制最多保留 100 筆，避免 localStorage 爆滿
+        if (history.length > 100) {
+            history.shift();
+        }
+
+        localStorage.setItem("analysis_history", JSON.stringify(history));
+    } catch (e) {
+        console.warn("⚠️ Failed to save analysis history snapshot:", e);
+    }
+}
+
+/* ================= 事件監聽與主程序 ================= */
 
 langSelect.addEventListener('change', (e) => {
     updateLanguage(e.target.value);
@@ -349,6 +524,8 @@ analyzeBtn.addEventListener('click', async () => {
         }
 
         const stockName = data.stock_name || symbol;
+        currentAnalyzedSymbol = symbol;
+
         window.lastAnalysisData = {
             symbol: symbol,
             stockName: stockName,
@@ -356,6 +533,7 @@ analyzeBtn.addEventListener('click', async () => {
         };
 
         renderSummary(window.lastAnalysisData);
+        updateFavButtonState(symbol);
 
         resultDecision.textContent = data.decision;
         resultReason.innerHTML = data.reason || '';
@@ -381,7 +559,6 @@ analyzeBtn.addEventListener('click', async () => {
         }
 
         if (data.entry_price && data.entry_price.detail) {
-            // 呈現後端已組合完成的多語系 detail 文字，並在下方附上免責聲明
             entryPriceDetail.innerHTML = `
                 <div>${data.entry_price.detail}</div>
                 <div class="form-text text-muted mt-1">${t.entryPriceDisclaimer}</div>
@@ -392,6 +569,9 @@ analyzeBtn.addEventListener('click', async () => {
         }
 
         resultCard.classList.remove('d-none');
+
+        // 靜默寫入歷史快照至 localStorage
+        saveAnalysisSnapshot(symbol, data, selectedFactorValues);
 
     } catch (err) {
         errorAlert.textContent = err.message;
@@ -406,8 +586,9 @@ symbolInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') analyzeBtn.click();
 });
 
-// 初始化載入偏好語言
+// 初始化載入偏好語言與最愛清單
 updateLanguage(currentLang);
+renderFavorites();
 </script>
 
 </body>

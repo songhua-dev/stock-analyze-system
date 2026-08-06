@@ -283,6 +283,27 @@ TRANSLATIONS = {
     "ENTRY_PRICE_DETAIL": {
         "zh": "建議進場價：{low}~{high}元（現價至短期支撐間）；買到賺到價：約{best_value}元（強力支撐附近）",
         "en": "Suggested Entry: ${low}~${high} (between current price and short-term support); Bargain Price: approx. ${best_value} (near strong support)"
+    },
+    # (前端 UI: 我的最愛與歷史紀錄)
+    "FAVORITES_TITLE": {
+        "zh": "我的最愛",
+        "en": "Favorites"
+    },
+    "ADD_TO_FAVORITES": {
+        "zh": "⭐ 加入最愛",
+        "en": "⭐ Add to Favorites"
+    },
+    "REMOVE_FROM_FAVORITES": {
+        "zh": "★ 已在最愛 (點擊移除)",
+        "en": "★ Favorited (Click to remove)"
+    },
+    "NO_FAVORITES_YET": {
+        "zh": "尚未建立最愛清單",
+        "en": "No favorites added yet."
+    },
+    "HISTORY_TITLE": {
+        "zh": "歷史查詢紀錄",
+        "en": "Analysis History"
     }
 }
 
