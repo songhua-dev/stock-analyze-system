@@ -203,6 +203,7 @@ const i18n = {
         emptyFactors: "（無因子明細，可能觸發否決規則）",
         errSymbolEmpty: "請輸入股票代號",
         errDefault: "分析失敗，請稍後再試",
+        errRateLimited: "由於免費版流量達到限制，需等待 15 分鐘後才能再次使用",
         lblStockSymbol: "股票代碼：",
         lblStockName: "股票名稱：",
         lblAnalysisFactors: "分析因子：",
@@ -242,6 +243,7 @@ const i18n = {
         emptyFactors: "(No details available, veto rule may have triggered)",
         errSymbolEmpty: "Please enter a ticker symbol.",
         errDefault: "Analysis failed, please try again later.",
+        errRateLimited: "Due to free tier rate limits, please wait 15 minutes before trying again.",
         lblStockSymbol: "Ticker Symbol: ",
         lblStockName: "Company Name: ",
         lblAnalysisFactors: "Factors: ",
@@ -523,7 +525,15 @@ analyzeBtn.addEventListener('click', async () => {
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.error || t.errDefault);
+            resultCard.classList.add('d-none');
+            
+            if (response.status === 429 || (data.error && data.error.includes("15"))) {
+                errorAlert.textContent = data.error || t.errRateLimited;
+            } else {
+                errorAlert.textContent = data.error || t.errDefault;
+            }
+            errorAlert.classList.remove('d-none');
+            return;
         }
 
         const stockName = data.stock_name || symbol;
@@ -563,7 +573,8 @@ analyzeBtn.addEventListener('click', async () => {
                 resultFactorLines.appendChild(li);
             });
         } else {
-            const li = document.className = 'list-group-item text-muted';
+            const li = document.createElement('li');
+            li.className = 'list-group-item text-muted';
             li.textContent = t.emptyFactors;
             resultFactorLines.appendChild(li);
         }
@@ -584,7 +595,8 @@ analyzeBtn.addEventListener('click', async () => {
         saveAnalysisSnapshot(symbol, data, selectedFactorValues);
 
     } catch (err) {
-        errorAlert.textContent = err.message;
+        resultCard.classList.add('d-none');
+        errorAlert.textContent = err.message || t.errDefault;
         errorAlert.classList.remove('d-none');
     } finally {
         loadingIndicator.classList.add('d-none');

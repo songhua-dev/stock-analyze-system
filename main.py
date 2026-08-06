@@ -133,10 +133,15 @@ def analyze_route():
 
     # 抓取目標價 (安全容錯，被限流時自動跳過不報 500)
     try:
-        target_price_data = fetch_analyst_target_price(symbol)
+        df = fetch_stock_data(symbol, days=120, source=data_source)
     except Exception as e:
-        print(f"⚠️ 分析師目標價抓取受限 ({e})")
-        target_price_data = {"target_mean": None, "target_high": None, "target_low": None}
+        err_str = str(e)
+        # 🔹 攔截 429 / Rate Limit 錯誤並精準回傳
+        if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
+            return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
+            
+        err_msg = t("MAIN_ERR_FETCH_DATA_FAILED", lang, source=data_source, symbol=symbol)
+        return jsonify({"error": err_msg}), 500
 
     # -----------------------------------------------------------------
     # 【新增】共用價格基準計算：現價 / 短期支撐(20日低點) / 強力支撐(120日低點)

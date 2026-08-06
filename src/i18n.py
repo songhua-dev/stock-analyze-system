@@ -304,6 +304,10 @@ TRANSLATIONS = {
     "HISTORY_TITLE": {
         "zh": "歷史查詢紀錄",
         "en": "Analysis History"
+    },
+    "MAIN_ERR_RATE_LIMITED": {
+        "zh": "由於免費版流量達到限制，需等待 15 分鐘後才能再次使用",
+        "en": "Due to free tier rate limits, please wait 15 minutes before trying again."
     }
 }
 
