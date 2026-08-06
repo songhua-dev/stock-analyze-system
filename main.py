@@ -117,7 +117,10 @@ def analyze_route():
     # 抓取公司名稱（加 try-catch 避免崩潰）
     try:
         stock_info = fetch_stock_name(symbol)
-        stock_name = stock_info.get("stock_name", symbol)
+        if isinstance(stock_info, dict):
+            stock_name = stock_info.get("stock_name") or symbol
+        else:
+            stock_name = str(stock_info)
     except Exception:
         stock_name = symbol
 
