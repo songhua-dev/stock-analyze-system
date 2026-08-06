@@ -137,6 +137,11 @@
 
             <h6><strong data-i18n="headerFactorDetails">因子明細</strong></h6>
             <ul id="resultFactorLines" class="list-group list-group-flush"></ul>
+
+            <div id="entryPriceCard" class="mt-3 p-3 bg-light rounded d-none">
+                <h6><strong data-i18n="headerEntryPrice">建議進場價參考</strong></h6>
+                <div id="entryPriceDetail"></div>
+            </div>
         </div>
     </div>
 
@@ -165,6 +170,10 @@ const i18n = {
         placeholderText: "等待選擇搜尋條件",
         loadingText: "分析中，若有勾選新聞情緒分析可能需要多等幾秒...",
         headerFactorDetails: "因子明細",
+        headerEntryPrice: "建議進場價參考",
+        labelEntryRange: "建議進場價區間",
+        labelBestValue: "買到賺到價",
+        entryPriceDisclaimer: "此為價格參考資訊，不代表建議進場，請自行評估風險",
         emptyFactors: "（無因子明細，可能觸發否決規則）",
         errSymbolEmpty: "請輸入股票代號",
         errDefault: "分析失敗，請稍後再試",
@@ -195,6 +204,10 @@ const i18n = {
         placeholderText: "Awaiting selection criteria...",
         loadingText: "Analyzing... News sentiment analysis may take a few seconds.",
         headerFactorDetails: "Factor Breakdown",
+        headerEntryPrice: "Suggested Entry Price",
+        labelEntryRange: "Entry Price Range",
+        labelBestValue: "Best Value Price",
+        entryPriceDisclaimer: "Reference price info only, not a recommendation to enter. Assess risk yourself.",
         emptyFactors: "(No details available, veto rule may have triggered)",
         errSymbolEmpty: "Please enter a ticker symbol.",
         errDefault: "Analysis failed, please try again later.",
@@ -217,6 +230,8 @@ const resultDecision = document.getElementById('resultDecision');
 const resultReason = document.getElementById('resultReason');
 const resultWarning = document.getElementById('resultWarning');
 const resultFactorLines = document.getElementById('resultFactorLines');
+const entryPriceCard = document.getElementById('entryPriceCard');
+const entryPriceDetail = document.getElementById('entryPriceDetail');
 
 const placeholderText = document.getElementById('placeholderText');
 const summaryContent = document.getElementById('summaryContent');
@@ -275,6 +290,7 @@ function resetUI() {
     errorAlert.classList.add('d-none');
     resultCard.classList.add('d-none');
     resultWarning.classList.add('d-none');
+    entryPriceCard.classList.add('d-none');
 }
 
 function renderSummary(data) {
@@ -362,6 +378,11 @@ analyzeBtn.addEventListener('click', async () => {
             li.className = 'list-group-item text-muted';
             li.textContent = t.emptyFactors;
             resultFactorLines.appendChild(li);
+        }
+
+        if (data.entry_price) {
+            entryPriceDetail.textContent = data.entry_price.detail;
+            entryPriceCard.classList.remove('d-none');
         }
 
         resultCard.classList.remove('d-none');

@@ -25,6 +25,7 @@ from src.factors.candlestick_factor import calculate_candlestick_score
 from src.factors.volume_factor import calculate_volume_multiplier
 from src.factors.news_factor import analyze_news_sentiment
 from src.factors.put_call_ratio_factor import calculate_put_call_ratio_score
+from src.factors.entry_price_factor import calculate_entry_price
 
 app = Flask(__name__)
 # 讀取環境變數 DEMO_MODE，預設為 False (本機開發時為全功能版)
@@ -134,9 +135,18 @@ def analyze_route():
         print(f"⚠️ 分析師目標價抓取受限 ({e})")
         target_price_data = {"target_mean": None, "target_high": None, "target_low": None}
 
+    # -----------------------------------------------------------------
+    # 【新增】共用價格基準計算：現價 / 短期支撐(20日低點) / 強力支撐(120日低點)
+    # 這三個數字同時被 RR因子 與 entry_price_factor 使用，這裡只算一次，
+    # 避免重複用 df['close'].min() 等運算浪費資源、也避免兩處各自算出不一致的數字。
+    # -----------------------------------------------------------------
+    current_price = float(df['close'].iloc[-1])
+    strong_support = float(df['close'].min())  # 近120日最低收盤（強力支撐，RR值否決規則使用）
+    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support  # 近20日最低收盤（短期支撐）
+
     # 第2步：計算因子 (均帶入 lang 參數進行國際化支援)
     factor_results = {}
-    
+
     # K線評分
     try:
         factor_results["candlestick"] = calculate_candlestick_score(df, lang=lang)
@@ -146,11 +156,9 @@ def analyze_route():
     # RR評分
     if "rr" in selected_factors:
         try:
-            current_price = float(df['close'].iloc[-1])
-            support_price = float(df['close'].min())
             target_price = target_price_data.get("target_mean")
             if target_price is not None:
-                factor_results["rr"] = calculate_rr_score(current_price, support_price, target_price, lang=lang)
+                factor_results["rr"] = calculate_rr_score(current_price, strong_support, target_price, lang=lang)
         except Exception as e:
             print(f"⚠️ RR 計算失敗: {e}")
 
@@ -168,7 +176,7 @@ def analyze_route():
             if options_data.get("usable"):
                 data_type = options_data.get("data_type")
                 factor_results["put_call"] = calculate_put_call_ratio_score(
-                    options_data.get("put_call_ratio"), 
+                    options_data.get("put_call_ratio"),
                     data_type=data_type,
                     lang=lang
                 )
@@ -180,6 +188,18 @@ def analyze_route():
         volume_result = calculate_volume_multiplier(df, lang=lang)
     except Exception:
         volume_result = {"multiplier": 1.0, "detail": ""}
+
+    # -----------------------------------------------------------------
+    # 【新增】建議進場價 / 買到賺到價
+    # 這不是計分因子，不進 factor_results（不參與加權平均），
+    # 永遠計算（不受 selected_factors 影響），因為這是核心價格資訊，
+    # 不是使用者可以選擇要不要看的「分析角度」。
+    # -----------------------------------------------------------------
+    try:
+        entry_price_data = calculate_entry_price(current_price, short_support, strong_support, lang=lang)
+    except Exception as e:
+        print(f"⚠️ Entry Price 計算失敗: {e}")
+        entry_price_data = {"available": False, "detail": ""}
 
     # 第4步：算式整合與分析（帶入 lang 參數）
     try:
@@ -195,8 +215,8 @@ def analyze_route():
         err_msg = t("MAIN_ERR_ANALYSIS_FAILED", lang, error=e)
         return jsonify({"error": err_msg}), 500
 
-    # 第5步：格式化輸出（帶入 lang 參數）
-    formatted_output = format_analysis_output(analysis_result, lang=lang)
+    # 第5步：格式化輸出（帶入 lang 參數，並傳入 entry_price_data）
+    formatted_output = format_analysis_output(analysis_result, entry_price_data=entry_price_data, lang=lang)
     formatted_output["stock_name"] = stock_name
     return jsonify(formatted_output)
 
