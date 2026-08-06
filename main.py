@@ -63,7 +63,6 @@ def analyze_route():
     # -----------------------------------------------------------------
     # 🛡️ 2. 頻繁 Request 防禦 (限流 10 秒)
     # -----------------------------------------------------------------
-    # 優先抓取 Render / 反向代理傳遞的真實 IP，無則取 remote_addr
     client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     if client_ip and "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
@@ -82,28 +81,21 @@ def analyze_route():
     market = request.args.get("market", "us").lower().strip()
     raw_symbol = request.args.get("symbol", "")
 
-    # -----------------------------------------------------------------
-    # 全形轉半形 + 去空白 + 轉大寫 (解決手機全形輸入問題)
-    # -----------------------------------------------------------------
+    # 全形轉半形 + 去空白 + 轉大寫
     symbol = unicodedata.normalize('NFKC', raw_symbol).upper().strip()
 
     if not symbol:
         return jsonify({"error": t("MAIN_ERR_SYMBOL_REQUIRED", lang)}), 400
 
-    # -----------------------------------------------------------------
     # 市場分流預留接口
-    # -----------------------------------------------------------------
     if market == "tw":
         return jsonify({"error": t("MAIN_ERR_TW_API_IN_DEV", lang)}), 501
 
-    # 以下為美股 (market == "us") 的既有邏輯
     factors_param = request.args.get("factors", "")
     selected_factors = [f.strip() for f in factors_param.split(",") if f.strip()]
     data_source = request.args.get("source", "yfinance")
 
-    # -----------------------------------------------------------------
-    # 🛡️ Demo 模式安全防護（後端第二道防線）
-    # -----------------------------------------------------------------
+    # Demo 模式安全防護
     if IS_DEMO_MODE:
         if data_source == "alpaca":
             return jsonify({
@@ -114,7 +106,7 @@ def analyze_route():
                 "error": t("MAIN_ERR_DEMO_NEWS_BLOCKED", lang)
             }), 400
 
-    # 抓取公司名稱（加 try-catch 避免崩潰）
+    # 抓取公司名稱
     try:
         stock_info = fetch_stock_name(symbol)
         if isinstance(stock_info, dict):
@@ -126,33 +118,30 @@ def analyze_route():
 
     # 第1步：抓取美股基礎資料 (K線)
     try:
-        df = fetch_stock_data(symbol, days=120, source=data_source)
-    except Exception as e:
-        err_msg = t("MAIN_ERR_FETCH_DATA_FAILED", lang, source=data_source, symbol=symbol)
-        return jsonify({"error": err_msg}), 500
-
-    # 抓取目標價 (安全容錯，被限流時自動跳過不報 500)
-    try:
-        df = fetch_stock_data(symbol, days=120, source=data_source)
+        df = fetch_stock_data(symbol, days=120, source=data_source, lang=lang)
     except Exception as e:
         err_str = str(e)
-        # 🔹 攔截 429 / Rate Limit 錯誤並精準回傳
         if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
             return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
             
         err_msg = t("MAIN_ERR_FETCH_DATA_FAILED", lang, source=data_source, symbol=symbol)
         return jsonify({"error": err_msg}), 500
 
-    # -----------------------------------------------------------------
-    # 【新增】共用價格基準計算：現價 / 短期支撐(20日低點) / 強力支撐(120日低點)
-    # 這三個數字同時被 RR因子 與 entry_price_factor 使用，這裡只算一次，
-    # 避免重複用 df['close'].min() 等運算浪費資源、也避免兩處各自算出不一致的數字。
-    # -----------------------------------------------------------------
-    current_price = float(df['close'].iloc[-1])
-    strong_support = float(df['close'].min())  # 近120日最低收盤（強力支撐，RR值否決規則使用）
-    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support  # 近20日最低收盤（短期支撐）
+    # 先將 target_price_data 初始化為 None，避免未宣告引發 NameError
+    target_price_data = None
 
-    # 第2步：計算因子 (均帶入 lang 參數進行國際化支援)
+    # 若選取 RR 分析或算式分析需要，抓取分析師目標價
+    try:
+        target_price_data = fetch_analyst_target_price(symbol, source=data_source, lang=lang)
+    except Exception as e:
+        print(f"⚠️ 抓取目標價失敗/跳過: {e}")
+
+    # 共用價格基準計算
+    current_price = float(df['close'].iloc[-1])
+    strong_support = float(df['close'].min())  # 近120日最低收盤
+    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support  # 近20日最低收盤
+
+    # 第2步：計算因子
     factor_results = {}
 
     # K線評分
@@ -164,9 +153,10 @@ def analyze_route():
     # RR評分
     if "rr" in selected_factors:
         try:
-            target_price = target_price_data.get("target_mean")
-            if target_price is not None:
-                factor_results["rr"] = calculate_rr_score(current_price, strong_support, target_price, lang=lang)
+            if target_price_data and isinstance(target_price_data, dict):
+                target_price = target_price_data.get("target_mean")
+                if target_price is not None:
+                    factor_results["rr"] = calculate_rr_score(current_price, strong_support, target_price, lang=lang)
         except Exception as e:
             print(f"⚠️ RR 計算失敗: {e}")
 
@@ -197,19 +187,14 @@ def analyze_route():
     except Exception:
         volume_result = {"multiplier": 1.0, "detail": ""}
 
-    # -----------------------------------------------------------------
-    # 【新增】建議進場價 / 買到賺到價
-    # 這不是計分因子，不進 factor_results（不參與加權平均），
-    # 永遠計算（不受 selected_factors 影響），因為這是核心價格資訊，
-    # 不是使用者可以選擇要不要看的「分析角度」。
-    # -----------------------------------------------------------------
+    # 建議進場價計算
     try:
         entry_price_data = calculate_entry_price(current_price, short_support, strong_support, lang=lang)
     except Exception as e:
         print(f"⚠️ Entry Price 計算失敗: {e}")
         entry_price_data = {"available": False, "detail": ""}
 
-    # 第4步：算式整合與分析（帶入 lang 參數）
+    # 第4步：算式整合與分析
     try:
         analysis_result = analyze_stock(
             df=df,
@@ -223,7 +208,7 @@ def analyze_route():
         err_msg = t("MAIN_ERR_ANALYSIS_FAILED", lang, error=e)
         return jsonify({"error": err_msg}), 500
 
-    # 第5步：格式化輸出（帶入 lang 參數，並傳入 entry_price_data）
+    # 第5步：格式化輸出
     formatted_output = format_analysis_output(analysis_result, entry_price_data=entry_price_data, lang=lang)
     formatted_output["stock_name"] = stock_name
     return jsonify(formatted_output)
