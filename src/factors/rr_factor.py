@@ -4,6 +4,7 @@ RR值（風險報酬比）計分因子
 """
 
 from typing import Dict
+from src.i18n import t
 
 
 def calculate_rr_score(
@@ -12,13 +13,13 @@ def calculate_rr_score(
     target_price: float, 
     lang: str = "zh"
 ) -> Dict:
-    lang = "en" if lang.startswith("en") else "zh"
+    lang = "en" if str(lang).startswith("en") else "zh"
 
     upside = target_price - current_price
     risk = current_price - support_price
 
     if risk <= 0:
-        err_msg = "支撐價計算異常，無法計算RR值" if lang == "zh" else "Invalid support price; R/R calculation failed"
+        err_msg = t("RR_ERR_INVALID_SUPPORT", lang)
         return {"score": 0.0, "usable": False, "detail": err_msg}
 
     rr_ratio = upside / risk
@@ -32,9 +33,9 @@ def calculate_rr_score(
     else:
         score = 0.0
 
-    if lang == "zh":
-        detail = f"RR值 1:{rr_ratio:.2f}，獲得{score:+.0f}分" if score > 0 else f"RR值 1:{rr_ratio:.2f}"
+    if score > 0:
+        detail = t("RR_DETAIL_WITH_SCORE", lang, ratio=rr_ratio, score=score)
     else:
-        detail = f"R/R Ratio 1:{rr_ratio:.2f}, Score: {score:+.0f} pts" if score > 0 else f"R/R Ratio 1:{rr_ratio:.2f}"
+        detail = t("RR_DETAIL_WITHOUT_SCORE", lang, ratio=rr_ratio)
 
     return {"score": score, "usable": True, "detail": detail}

@@ -6,9 +6,11 @@ Flask 主程式（路由層）
 """
 
 import os
+import time
 import unicodedata  # 用於全形轉半形
 from flask import Flask, request, jsonify, render_template
 
+from src.i18n import t
 from src.us_Api_client import (
     fetch_stock_data,
     fetch_analyst_target_price,
@@ -28,9 +30,19 @@ app = Flask(__name__)
 # 讀取環境變數 DEMO_MODE，預設為 False (本機開發時為全功能版)
 IS_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 
+# 紀錄每個 IP 上一次發送請求的時間戳記（用作 10 秒 Rate Limit 防禦）
+last_request_time = {}
+
 @app.route('/ping', methods=['GET'])
 def ping():
     return 'ok', 200
+
+# -----------------------------------------------------------------
+# 🛡️ 1. Favicon 防禦路由 (攔截 404 雜訊請求)
+# -----------------------------------------------------------------
+@app.route('/favicon.ico', methods=['GET'])
+def favicon():
+    return '', 204
 
 @app.route("/", methods=["GET"])
 def index():
@@ -43,11 +55,31 @@ def analyze_route():
     """
     範例請求：/api/analyze?market=us&symbol=PLTR&factors=rr,news&lang=en
     """
+    # 讀取前端傳來的語言參數（預設為 en）
+    lang = request.args.get("lang", "en").lower().strip()
+    lang = "en" if lang.startswith("en") else "zh"
+
+    # -----------------------------------------------------------------
+    # 🛡️ 2. 頻繁 Request 防禦 (限流 10 秒)
+    # -----------------------------------------------------------------
+    # 優先抓取 Render / 反向代理傳遞的真實 IP，無則取 remote_addr
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    current_time = time.time()
+    if client_ip in last_request_time:
+        elapsed = current_time - last_request_time[client_ip]
+        if elapsed < 10:
+            return jsonify({
+                "error": t("MAIN_ERR_RATE_LIMIT", lang)
+            }), 429
+
+    # 更新此 IP 的最新請求時間
+    last_request_time[client_ip] = current_time
+
     market = request.args.get("market", "us").lower().strip()
     raw_symbol = request.args.get("symbol", "")
-    
-    # 🔹 讀取前端傳來的語言參數（預設為 en）
-    lang = request.args.get("lang", "en").lower().strip()
 
     # -----------------------------------------------------------------
     # 全形轉半形 + 去空白 + 轉大寫 (解決手機全形輸入問題)
@@ -55,13 +87,13 @@ def analyze_route():
     symbol = unicodedata.normalize('NFKC', raw_symbol).upper().strip()
 
     if not symbol:
-        return jsonify({"error": "請提供股票代號 (symbol)"}), 400
+        return jsonify({"error": t("MAIN_ERR_SYMBOL_REQUIRED", lang)}), 400
 
     # -----------------------------------------------------------------
     # 市場分流預留接口
     # -----------------------------------------------------------------
     if market == "tw":
-        return jsonify({"error": "台股 API 分析接口開發中"}), 501
+        return jsonify({"error": t("MAIN_ERR_TW_API_IN_DEV", lang)}), 501
 
     # 以下為美股 (market == "us") 的既有邏輯
     factors_param = request.args.get("factors", "")
@@ -74,11 +106,11 @@ def analyze_route():
     if IS_DEMO_MODE:
         if data_source == "alpaca":
             return jsonify({
-                "error": "🔒 雲端 Demo 版暫不開放 Alpaca API 資料來源，請下載 GitHub 專案於本機執行。"
+                "error": t("MAIN_ERR_DEMO_ALPACA_BLOCKED", lang)
             }), 400
         if "news" in selected_factors:
             return jsonify({
-                "error": "🔒 雲端 Demo 版暫不開放 LLM 新聞情緒分析，避免 API 額度耗盡。請下載 GitHub 專案於本機執行。"
+                "error": t("MAIN_ERR_DEMO_NEWS_BLOCKED", lang)
             }), 400
 
     # 抓取公司名稱（加 try-catch 避免崩潰）
@@ -92,7 +124,8 @@ def analyze_route():
     try:
         df = fetch_stock_data(symbol, days=120, source=data_source)
     except Exception as e:
-        return jsonify({"error": f"❌ {data_source} 無法取得 {symbol} 的數據，請輸入正確股票代碼或其他股票。"}), 500
+        err_msg = t("MAIN_ERR_FETCH_DATA_FAILED", lang, source=data_source, symbol=symbol)
+        return jsonify({"error": err_msg}), 500
 
     # 抓取目標價 (安全容錯，被限流時自動跳過不報 500)
     try:
@@ -131,20 +164,12 @@ def analyze_route():
     # Put/Call 選擇權評分
     if "put_call" in selected_factors:
         try:
-            options_data = fetch_options_ratio(symbol, min_days_out=3)
+            options_data = fetch_options_ratio(symbol, min_days_out=3, lang=lang)
             if options_data.get("usable"):
-                data_type = options_data.get("data_type", "")
-                
-                # 🔹 補齊 data_type 的多語系轉換
-                if not lang.startswith("zh"):
-                    if "成交量" in data_type:
-                        data_type = "Daily Volume"
-                    elif "未平倉" in data_type:
-                        data_type = "Open Interest"
-
+                data_type = options_data.get("data_type")
                 factor_results["put_call"] = calculate_put_call_ratio_score(
                     options_data.get("put_call_ratio"), 
-                    data_type,
+                    data_type=data_type,
                     lang=lang
                 )
         except Exception as e:
@@ -156,7 +181,7 @@ def analyze_route():
     except Exception:
         volume_result = {"multiplier": 1.0, "detail": ""}
 
-    # 🔹 第4步：算式整合與分析（帶入 lang 參數）
+    # 第4步：算式整合與分析（帶入 lang 參數）
     try:
         analysis_result = analyze_stock(
             df=df,
@@ -167,9 +192,10 @@ def analyze_route():
             lang=lang
         )
     except Exception as e:
-        return jsonify({"error": f"量化分析計算發生錯誤: {e}"}), 500
+        err_msg = t("MAIN_ERR_ANALYSIS_FAILED", lang, error=e)
+        return jsonify({"error": err_msg}), 500
 
-    # 🔹 第5步：格式化輸出（帶入 lang 參數）
+    # 第5步：格式化輸出（帶入 lang 參數）
     formatted_output = format_analysis_output(analysis_result, lang=lang)
     formatted_output["stock_name"] = stock_name
     return jsonify(formatted_output)

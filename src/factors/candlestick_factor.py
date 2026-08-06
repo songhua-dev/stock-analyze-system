@@ -3,6 +3,7 @@
 import talib
 import pandas as pd
 from typing import Dict
+from src.i18n import t
 
 BULKOWSKI_TIERS = {
     ("CDL3LINESTRIKE", -1): {"score": -5.0, "name": "Bearish Three Line Strike", "winrate": "67.38%"},
@@ -15,10 +16,10 @@ BULKOWSKI_TIERS = {
 
 
 def calculate_candlestick_score(df: pd.DataFrame, lang: str = "zh") -> Dict:
-    lang = "en" if lang.startswith("en") else "zh"
+    lang = "en" if str(lang).startswith("en") else "zh"
 
     if len(df) < 10:
-        err_msg = "K線資料不足，無法進行型態辨識" if lang == "zh" else "Insufficient K-line data for pattern recognition"
+        err_msg = t("CANDLESTICK_INSUFFICIENT_DATA", lang)
         return {"score": 0.0, "usable": False, "detail": err_msg}
 
     op = df['open'].values
@@ -42,7 +43,7 @@ def calculate_candlestick_score(df: pd.DataFrame, lang: str = "zh") -> Dict:
             matched_patterns.append(tier_info)
 
     if not matched_patterns:
-        no_pattern_msg = "無特殊 K 線型態（不額外加減分）" if lang == "zh" else "No special candlestick pattern detected"
+        no_pattern_msg = t("CANDLESTICK_NO_PATTERN", lang)
         return {
             "score": 0.0, 
             "usable": True, 
@@ -51,13 +52,12 @@ def calculate_candlestick_score(df: pd.DataFrame, lang: str = "zh") -> Dict:
 
     best_match = max(matched_patterns, key=lambda p: abs(p["score"]))
 
-    if lang == "zh":
-        detail = (f"符合 {best_match['name']}"
-                  f"（統計可信度 {best_match['winrate']}），"
-                  f"獲得 {best_match['score']:+.1f}分")
-    else:
-        detail = (f"Matched {best_match['name']} "
-                  f"(Win rate: {best_match['winrate']}), "
-                  f"Score: {best_match['score']:+.1f} pts")
+    detail = t(
+        "CANDLESTICK_MATCHED_DETAIL", 
+        lang, 
+        name=best_match["name"], 
+        winrate=best_match["winrate"], 
+        score=best_match["score"]
+    )
 
     return {"score": best_match["score"], "usable": True, "detail": detail}

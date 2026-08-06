@@ -1,3 +1,5 @@
+# src/us_Api_client.py
+
 import os
 import time
 from datetime import datetime, timedelta
@@ -8,6 +10,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient, NewsClient
 from alpaca.data.requests import StockBarsRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame
+from src.i18n import t
 
 # 載入 .env 環境變數
 load_dotenv()
@@ -65,10 +68,10 @@ def _format_dataframe_prices(df: pd.DataFrame) -> pd.DataFrame:
 # 1. K線資料抓取 (Dual-Track)
 # -------------------------------------------------------------------
 
-def fetch_alpaca_bars(symbol: str, days: int = 120) -> pd.DataFrame:
+def fetch_alpaca_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
     """從 Alpaca 抓取 K 線並統一欄位格式 (預設 120 天，明確指定 IEX Feed 避開 SIP 免費限制)"""
     if not stock_client:
-        raise ValueError("❌ 未找到有效的 Alpaca API Key，無法使用 Alpaca 資料源。")
+        raise ValueError(t("ERR_NO_ALPACA_KEY", lang))
 
     # 免費版限制：歷史資料結束時間須為 16 分鐘以前
     end_time = datetime.now() - timedelta(minutes=16)
@@ -98,13 +101,13 @@ def fetch_alpaca_bars(symbol: str, days: int = 120) -> pd.DataFrame:
     return _format_dataframe_prices(df)
 
 
-def fetch_yfinance_bars(symbol: str, days: int = 120) -> pd.DataFrame:
+def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
     """從 yfinance 抓取 K 線並統一欄位格式 (預設 120 天)"""
     ticker = yf.Ticker(symbol)
     df = ticker.history(period=f"{days}d")
 
     if df.empty:
-        raise ValueError(f"❌ yfinance 無法取得 {symbol} 的數據。")
+        raise ValueError(t("ERR_YFINANCE_NO_DATA", lang, symbol=symbol))
 
     df = df.reset_index()
 
@@ -122,29 +125,29 @@ def fetch_yfinance_bars(symbol: str, days: int = 120) -> pd.DataFrame:
     df = df.dropna(subset=['open', 'high', 'low', 'close']).reset_index(drop=True)
 
     if df.empty:
-        raise ValueError(f"❌ {symbol} 清除NaN列後無有效資料")
+        raise ValueError(t("ERR_CLEANED_DATA_EMPTY", lang, symbol=symbol))
 
     return _format_dataframe_prices(df)
 
 
-def fetch_stock_data(symbol: str, days: int = 120, source: str = 'alpaca') -> pd.DataFrame:
+def fetch_stock_data(symbol: str, days: int = 120, source: str = 'alpaca', lang: str = "zh") -> pd.DataFrame:
     """統一切換介面：抓取股票 K 線資料 (預設天數調整為 120 天)"""
     if source.lower() == 'alpaca':
-        return fetch_alpaca_bars(symbol, days)
+        return fetch_alpaca_bars(symbol, days, lang=lang)
     elif source.lower() == 'yfinance':
-        return fetch_yfinance_bars(symbol, days)
+        return fetch_yfinance_bars(symbol, days, lang=lang)
     else:
-        raise ValueError(f"❌ 不支援的資料來源: {source}。請使用 'alpaca' 或 'yfinance'。")
+        raise ValueError(t("ERR_UNSUPPORTED_SOURCE", lang, source=source))
 
 
 # -------------------------------------------------------------------
 # 2. 新聞資料抓取 (Dual-Track)
 # -------------------------------------------------------------------
 
-def fetch_alpaca_news(symbol: str, limit: int = 5) -> list:
+def fetch_alpaca_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     """從 Alpaca 抓取新聞（精準解構 news 列表）"""
     if not news_client:
-        raise ValueError("❌ 未找到有效的 Alpaca API Key。")
+        raise ValueError(t("ERR_NO_ALPACA_KEY", lang))
 
     request_params = NewsRequest(symbols=symbol, limit=limit)
     news_res = news_client.get_news(request_params)
@@ -169,7 +172,7 @@ def fetch_alpaca_news(symbol: str, limit: int = 5) -> list:
         else:
             item_dict = {}
 
-        headline = item_dict.get('headline') or getattr(item, 'headline', '無新聞標題')
+        headline = item_dict.get('headline') or getattr(item, 'headline', t("NO_NEWS_TITLE", lang))
         url = item_dict.get('url') or getattr(item, 'url', '')
         created_at = item_dict.get('created_at') or getattr(item, 'created_at', None)
 
@@ -188,7 +191,7 @@ def fetch_alpaca_news(symbol: str, limit: int = 5) -> list:
     return results
 
 
-def fetch_yfinance_news(symbol: str, limit: int = 5) -> list:
+def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     """從 yfinance 抓取新聞 (含多層防禦性解析)"""
     ticker = yf.Ticker(symbol)
     news_items = ticker.news
@@ -212,7 +215,7 @@ def fetch_yfinance_news(symbol: str, limit: int = 5) -> list:
 
         if not title:
             found_title = _find_key_recursive(item, ["title", "headline"])
-            title = found_title if found_title else "無新聞標題"
+            title = found_title if found_title else t("NO_NEWS_TITLE", lang)
 
         if not url:
             found_url = _find_key_recursive(item, ["url", "link"])
@@ -227,21 +230,21 @@ def fetch_yfinance_news(symbol: str, limit: int = 5) -> list:
     return results
 
 
-def fetch_stock_news(symbol: str, limit: int = 5, source: str = 'alpaca') -> list:
+def fetch_stock_news(symbol: str, limit: int = 5, source: str = 'alpaca', lang: str = "zh") -> list:
     """統一切換介面：抓取個股新聞"""
     if source.lower() == 'alpaca':
-        return fetch_alpaca_news(symbol, limit)
+        return fetch_alpaca_news(symbol, limit, lang=lang)
     elif source.lower() == 'yfinance':
-        return fetch_yfinance_news(symbol, limit)
+        return fetch_yfinance_news(symbol, limit, lang=lang)
     else:
-        raise ValueError(f"❌ 不支援的資料來源: {source}。")
+        raise ValueError(t("ERR_UNSUPPORTED_SOURCE", lang, source=source))
 
 
 # -------------------------------------------------------------------
 # 3. 分析師目標價抓取 (含 In-Memory 快取防護機制)
 # -------------------------------------------------------------------
 
-def fetch_analyst_target_price(symbol: str, source: str = 'yfinance') -> dict:
+def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str = "zh") -> dict:
     """
     抓取分析師目標價 (含快取機制，避免 Render 觸發 429 限制)。
     """
@@ -255,7 +258,7 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance') -> dict:
             return cached_data
 
     if source.lower() != 'yfinance':
-        print(f"⚠️ 提示：Alpaca API 不支援目標價數據，自動切換至 yfinance 進行抓取。")
+        print(t("WARN_TARGET_PRICE_FALLBACK", lang))
 
     try:
         ticker = yf.Ticker(symbol_upper)
@@ -277,7 +280,7 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance') -> dict:
         return result
 
     except Exception as e:
-        print(f"⚠️ 分析師目標價抓取失敗或遭受請求限制 ({e})")
+        print(t("WARN_TARGET_PRICE_FETCH_FAILED", lang, error=e))
         # 降級保護：若抓取失敗，但快取中有過期資料，則繼續沿用舊資料
         if symbol_upper in TARGET_PRICE_CACHE:
             return TARGET_PRICE_CACHE[symbol_upper][0]
@@ -294,12 +297,12 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance') -> dict:
 # 4. Put/Call Ratio 選擇權比率抓取 (單軌：yfinance)
 # -------------------------------------------------------------------
 
-def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfinance') -> dict:
+def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfinance', lang: str = "zh") -> dict:
     """
     抓取選擇權鏈資料，計算 Put/Call Ratio（以當日成交量 Volume 計算）。
     """
     if source.lower() != 'yfinance':
-        print("⚠️ 提示：Put/Call Ratio 目前僅支援 yfinance，自動切換。")
+        print(t("WARN_OPTIONS_FALLBACK", lang))
 
     ticker = yf.Ticker(symbol)
 
@@ -307,11 +310,11 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
         available_dates = ticker.options
     except Exception as e:
         return {"put_call_ratio": None, "expiration": None, "usable": False,
-                "detail": f"無法取得選擇權到期日清單 ({e})"}
+                "detail": t("OPTIONS_ERR_EXPIRATION_LIST", lang, error=e)}
 
     if not available_dates:
         return {"put_call_ratio": None, "expiration": None, "usable": False,
-                "detail": "該股票無選擇權市場資料"}
+                "detail": t("OPTIONS_NO_MARKET_DATA", lang)}
 
     cutoff = datetime.now() + timedelta(days=min_days_out)
     target_date = None
@@ -330,20 +333,20 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
         put_vol = chain.puts['volume'].fillna(0).sum()
     except Exception as e:
         return {"put_call_ratio": None, "expiration": target_date, "usable": False,
-                "detail": f"選擇權鏈資料抓取失敗 ({e})"}
+                "detail": t("OPTIONS_ERR_CHAIN_FETCH", lang, error=e)}
 
     if not call_vol or call_vol == 0:
         return {"put_call_ratio": None, "expiration": target_date, "usable": False,
-                "detail": "Call當日成交量為0（可能非交易時段），無法計算比率"}
+                "detail": t("OPTIONS_CALL_VOL_ZERO", lang)}
 
     ratio = round(float(put_vol) / float(call_vol), 3)
 
     return {
         "put_call_ratio": ratio,
         "expiration": target_date,
-        "data_type": "當日成交量", 
+        "data_type": t("OPTIONS_DATA_TYPE_DAILY_VOL", lang), 
         "usable": True,
-        "detail": f"依據 {target_date} 到期選擇權鏈計算（當日成交量）"
+        "detail": t("OPTIONS_DETAIL_SUCCESS", lang, target_date=target_date)
     }
 
 
@@ -358,52 +361,3 @@ def fetch_stock_name(symbol: str) -> dict:
         return {"symbol": symbol, "stock_name": stock_name}
     except Exception:
         return {"symbol": symbol, "stock_name": symbol}
-
-
-# ===================================================================
-# 測試區塊
-# ===================================================================
-if __name__ == "__main__":
-    test_symbol = "PLTR"
-    print(f"🚀 開始測試 src/Api_client.py (測試標的: {test_symbol}, K線設定: 120天)\n" + "=" * 50)
-
-    try:
-        df_alpaca = fetch_stock_data(test_symbol, days=120, source='alpaca')
-        print(f"✅ [Alpaca] K線抓取成功！取得 {len(df_alpaca)} 筆日K資料，最新收盤價: {df_alpaca['close'].iloc[-1]}")
-    except Exception as e:
-        print(f"❌ [Alpaca] K線抓取失敗: {e}")
-
-    try:
-        df_yf = fetch_stock_data(test_symbol, days=120, source='yfinance')
-        print(f"✅ [yfinance] K線抓取成功！取得 {len(df_yf)} 筆日K資料，最新收盤價: {df_yf['close'].iloc[-1]}")
-    except Exception as e:
-        print(f"❌ [yfinance] K線抓取失敗: {e}")
-
-    try:
-        news_alpaca = fetch_stock_news(test_symbol, limit=5, source='alpaca')
-        print(f"✅ [Alpaca] 新聞抓取成功！取得 {len(news_alpaca)} 則新聞，最新標題: {news_alpaca[0]['headline']}")
-    except Exception as e:
-        print(f"❌ [Alpaca] 新聞抓取失敗: {e}")
-
-    try:
-        news_yf = fetch_stock_news(test_symbol, limit=5, source='yfinance')
-        print(f"✅ [yfinance] 新聞抓取成功！取得 {len(news_yf)} 則新聞，最新標題: {news_yf[0]['headline']}")
-    except Exception as e:
-        print(f"❌ [yfinance] 新聞抓取失敗: {e}")
-
-    try:
-        targets = fetch_analyst_target_price(test_symbol)
-        print(f"✅ [yfinance 單軌] 分析師目標價抓取成功！共識目標價: {targets['target_mean']}")
-    except Exception as e:
-        print(f"❌ 分析師目標價抓取失敗: {e}")
-
-    try:
-        options_data = fetch_options_ratio(test_symbol, min_days_out=3)
-        if options_data["usable"]:
-            print(f"✅ [yfinance] Put/Call Ratio 抓取成功！比率: {options_data['put_call_ratio']}（到期日: {options_data['expiration']}）")
-        else:
-            print(f"⚠️ Put/Call Ratio 無法計算: {options_data['detail']}")
-    except Exception as e:
-        print(f"❌ Put/Call Ratio 抓取失敗: {e}")
-
-    print("=" * 50 + "\n🎉 測試完畢！")

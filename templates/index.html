@@ -241,6 +241,9 @@ function updateLanguage(lang) {
     });
 
     if (window.lastAnalysisData) {
+        // 重新依最新語言抓取選取的因子名稱組合
+        const selectedObjects = getCheckedFactors();
+        window.lastAnalysisData.factorNames = selectedObjects.map(f => f.name).join(' + ');
         renderSummary(window.lastAnalysisData);
     }
 }
@@ -277,7 +280,11 @@ function resetUI() {
 function renderSummary(data) {
     const t = i18n[currentLang];
     placeholderText.classList.add('d-none');
-    summaryContent.innerHTML = `<strong>${t.lblStockSymbol}</strong>${data.symbol}<br><strong>${t.lblStockName}</strong>${data.stockName}<br><strong>${t.lblAnalysisFactors}</strong>${data.factorNames}`;
+    summaryContent.innerHTML = `
+        <strong data-i18n="lblStockSymbol">${t.lblStockSymbol}</strong>${data.symbol}<br>
+        <strong data-i18n="lblStockName">${t.lblStockName}</strong>${data.stockName}<br>
+        <strong data-i18n="lblAnalysisFactors">${t.lblAnalysisFactors}</strong>${data.factorNames}
+    `;
     summaryContent.classList.remove('d-none');
 }
 

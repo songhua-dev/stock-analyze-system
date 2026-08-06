@@ -5,45 +5,46 @@ Put/Call 比率分析因子模組 (put_call_ratio_factor.py)
 """
 
 from typing import Dict, Optional
+from src.i18n import t
 
 
 def calculate_put_call_ratio_score(
     pc_ratio: Optional[float],
-    data_type: str = "當日成交量",
+    data_type: Optional[str] = None,
     lang: str = "zh"
 ) -> Dict:
-    lang = "en" if lang.startswith("en") else "zh"
+    lang = "en" if str(lang).startswith("en") else "zh"
+
+    # 若未傳入 data_type，預設使用 i18n 字典中的「當日成交量」
+    if data_type is None:
+        data_type = t("OPTIONS_DATA_TYPE_DAILY_VOL", lang)
 
     if pc_ratio is None:
-        err_msg = "Put/Call 比率資料缺失，無法進行分析" if lang == "zh" else "Put/Call ratio data missing"
+        err_msg = t("PCR_ERR_DATA_MISSING", lang)
         return {
             "score": 0.0,
             "usable": False,
             "detail": err_msg
         }
 
-    # 1. 判斷多空方向與得分[cite: 9]
+    # 1. 判斷多空方向與得分
     if pc_ratio < 0.7:
-        sentiment_text = "偏多" if lang == "zh" else "Bullish"
+        sentiment_text = t("PCR_SENTIMENT_BULLISH", lang)
         score = 1.0
     elif pc_ratio > 1.0:
-        sentiment_text = "偏空" if lang == "zh" else "Bearish"
+        sentiment_text = t("PCR_SENTIMENT_BEARISH", lang)
         score = -1.0
     else:
-        sentiment_text = "中性" if lang == "zh" else "Neutral"
+        sentiment_text = t("PCR_SENTIMENT_NEUTRAL", lang)
         score = 0.0
 
-    # 2. 資料類型文字處理[cite: 9]
-    if lang == "en" and data_type == "當日成交量":
-        display_data_type = "Daily Volume"
-    else:
-        display_data_type = data_type
-
-    # 3. 格式化輸出[cite: 9]
-    detail = (
-        f"比率 {pc_ratio:.3f}({display_data_type}): {sentiment_text}"
-        if lang == "zh"
-        else f"Ratio {pc_ratio:.3f} ({display_data_type}): {sentiment_text}"
+    # 2. 格式化輸出
+    detail = t(
+        "PCR_DETAIL_FORMAT",
+        lang,
+        ratio=pc_ratio,
+        data_type=data_type,
+        sentiment=sentiment_text
     )
 
     return {

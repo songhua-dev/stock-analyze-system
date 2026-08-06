@@ -7,6 +7,7 @@ from typing import Dict
 from dotenv import load_dotenv
 from groq import Groq
 from src.us_Api_client import fetch_stock_news
+from src.i18n import t
 
 load_dotenv()
 
@@ -32,16 +33,16 @@ def _extract_summary(text: str, max_sentences: int = 3) -> str:
 
 
 def analyze_news_sentiment(symbol: str, limit: int = 5, source: str = 'alpaca', lang: str = "zh") -> Dict:
-    lang = "en" if lang.startswith("en") else "zh"
+    lang = "en" if str(lang).startswith("en") else "zh"
 
     try:
-        raw_news = fetch_stock_news(symbol, limit=limit, source=source)
+        raw_news = fetch_stock_news(symbol, limit=limit, source=source, lang=lang)
     except Exception as e:
-        err_msg = f"新聞資料抓取失敗 ({e})" if lang == "zh" else f"Failed to fetch news data ({e})"
+        err_msg = t("NEWS_ERR_FETCH_FAILED", lang, error=e)
         return {"score": 0, "usable": False, "detail": err_msg}
 
     if not raw_news:
-        no_news_msg = "近3日無相關新聞" if lang == "zh" else "No relevant news in the past 3 days"
+        no_news_msg = t("NEWS_NO_RECENT_NEWS", lang)
         return {"score": 0, "usable": False, "detail": no_news_msg}
 
     formatted_articles = []
@@ -55,11 +56,11 @@ def analyze_news_sentiment(symbol: str, limit: int = 5, source: str = 'alpaca', 
     combined_news_input = "\n\n".join(formatted_articles)
 
     if not groq_client:
-        key_msg = "缺少 GROQ_API_KEY，無法進行新聞情緒分析" if lang == "zh" else "GROQ_API_KEY missing. Sentiment analysis disabled."
+        key_msg = t("NEWS_ERR_NO_API_KEY", lang)
         return {"score": 0, "usable": False, "detail": key_msg}
 
-    # 根據 lang 動態切換 Prompt 要求的輸出語言
-    target_language_instruction = "請用『繁體中文』撰寫一句簡短摘要（30字以內）。" if lang == "zh" else "Please write a concise summary (within 20 words) in ENGLISH."
+    # 全權由 i18n 控制 Prompt 的目標語言指令
+    target_language_instruction = t("NEWS_PROMPT_LANG_INSTRUCTION", lang)
 
     prompt = f"""
 You are a professional US stock financial analyst. Analyze the following news regarding {symbol} and evaluate short-term price impact.
@@ -97,11 +98,11 @@ Return JSON ONLY, no markdown wrapping:
         result = json.loads(response.choices[0].message.content)
         final_score = max(-5, min(5, int(result.get("score", 0))))
         
-        default_detail = "已完成新聞情緒評估" if lang == "zh" else "Completed news sentiment assessment"
+        default_detail = t("NEWS_DEFAULT_DETAIL_SUCCESS", lang)
         detail_msg = result.get("detail", default_detail)
 
         return {"score": final_score, "usable": True, "detail": detail_msg}
 
     except Exception as e:
-        err_msg = f"LLM 新聞情緒分析過程發生例外 ({e})" if lang == "zh" else f"LLM sentiment analysis exception ({e})"
+        err_msg = t("NEWS_ERR_LLM_EXCEPTION", lang, error=e)
         return {"score": 0, "usable": False, "detail": err_msg}

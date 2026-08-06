@@ -6,6 +6,7 @@
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 from config import FACTOR_WEIGHTS
+from src.i18n import t
 
 
 def check_veto_rules(
@@ -18,24 +19,16 @@ def check_veto_rules(
 ) -> Optional[Dict]:
 
     if "rr" in selected_factors and current_price <= support_price:
-        reason = (
-            f"現價 ({current_price:.2f}元) 已跌破或等於強力支撐價 ({support_price:.2f}元)，風險評估失準"
-            if lang == "zh"
-            else f"Current price (${current_price:.2f}) broke/hit strong support (${support_price:.2f}). Risk assessment invalidated."
-        )
+        reason = t("VETO_PRICE_BELOW_SUPPORT", lang, current_price=current_price, support_price=support_price)
         return {"veto": True, "reason": reason}
 
     if "rr" in selected_factors:
         if target_price is None:
-            reason = "分析師目標價資料缺失，無法計算風險報酬比" if lang == "zh" else "Analyst target price data missing. R/R ratio unavailable."
+            reason = t("VETO_MISSING_TARGET_PRICE", lang)
             return {"veto": True, "reason": reason}
 
         if target_price <= current_price:
-            reason = (
-                f"分析師目標價 ({target_price:.2f}元)<br>低於或等於現價 ({current_price:.2f}元)<br>資料可能異常或看空"
-                if lang == "zh"
-                else f"Analyst target (${target_price:.2f}) is below/equal to current price (${current_price:.2f}). Bearish or invalid data."
-            )
+            reason = t("VETO_TARGET_BELOW_CURRENT", lang, target_price=target_price, current_price=current_price)
             return {"veto": True, "reason": reason}
 
         upside = target_price - current_price
@@ -43,19 +36,11 @@ def check_veto_rules(
         rr_ratio = upside / risk if risk > 0 else 0
 
         if rr_ratio < 2.0:
-            reason = (
-                f"現價{current_price:.2f}元<br>支撐價格為{support_price:.2f}元<br>分析師平均目標價為{target_price:.2f}元<br>RR值為1:{rr_ratio:.1f}, 低於建議值1:2"
-                if lang == "zh"
-                else f"Price: ${current_price:.2f}<br>Support: ${support_price:.2f}<br>Target: ${target_price:.2f}<br>R/R Ratio is 1:{rr_ratio:.1f}, below threshold 1:2"
-            )
+            reason = t("VETO_RR_TOO_LOW", lang, current_price=current_price, support_price=support_price, target_price=target_price, rr_ratio=rr_ratio)
             return {"veto": True, "reason": reason}
 
     if insider_net_sell_ratio is not None and insider_net_sell_ratio > 0.005:
-        reason = (
-            f"近30天內部人淨賣出達流通股本 {insider_net_sell_ratio*100:.2f}%，高於 0.5% 警戒門檻"
-            if lang == "zh"
-            else f"Insider net selling reached {insider_net_sell_ratio*100:.2f}% over 30 days, exceeding 0.5% threshold."
-        )
+        reason = t("VETO_INSIDER_NET_SELL", lang, ratio=insider_net_sell_ratio * 100)
         return {"veto": True, "reason": reason}
 
     return None
@@ -82,10 +67,10 @@ def analyze_stock(
     insider_net_sell_ratio: Optional[float] = None,
     lang: str = "zh"
 ) -> Dict:
-    lang = "en" if lang.startswith("en") else "zh"
+    lang = "en" if str(lang).startswith("en") else "zh"
 
     if df.empty or len(df) < 20:
-        err_msg = "K線數據不足，無法進行分析" if lang == "zh" else "Insufficient price data for analysis."
+        err_msg = t("ERR_INSUFFICIENT_DATA", lang)
         return {"status": "error", "reason": err_msg}
 
     current_price = float(df['close'].iloc[-1])
@@ -126,11 +111,7 @@ def analyze_stock(
     scores_list = list(all_factor_scores.values())
     divergence_warning = None
     if len(scores_list) >= 2 and (max(scores_list) - min(scores_list)) > 2:
-        divergence_warning = (
-            "⚠️ 訊號分歧：各項分析結果差異較大，建議謹慎評估"
-            if lang == "zh"
-            else "⚠️ Signal Divergence: Factor results differ significantly. Proceed with caution."
-        )
+        divergence_warning = t("WARNING_DIVERGENCE", lang)
 
     veto_result = check_veto_rules(
         current_price=current_price,
@@ -143,38 +124,22 @@ def analyze_stock(
 
     if veto_result is not None:
         status = "veto"
-        decision = "不建議入場" if lang == "zh" else "Not Recommended"
+        decision = t("DECISION_NOT_RECOMMENDED", lang)
         decision_reason = veto_result["reason"]
     else:
         status = "success"
         if final_score >= 4.0:
-            decision = "強烈建議入場" if lang == "zh" else "Strong Buy"
-            decision_reason = (
-                f"各項量化因子表現優異（總分 {final_score}分），技術面與風報比皆具備強勁買進訊號。"
-                if lang == "zh"
-                else f"Excellent factor ratings ({final_score} pts). Technicals and R/R show strong buy signals."
-            )
+            decision = t("DECISION_STRONG_BUY", lang)
+            decision_reason = t("REASON_STRONG_BUY", lang, score=final_score)
         elif final_score >= 2.0:
-            decision = "建議入場，可觀察" if lang == "zh" else "Buy / Accumulate"
-            decision_reason = (
-                f"量化評分為 {final_score}分 達到入場門檻，整體風險可控，可考慮分批佈局。"
-                if lang == "zh"
-                else f"Score reached entry threshold ({final_score} pts). Controlled risk; partial positions recommended."
-            )
+            decision = t("DECISION_BUY_ACCUMULATE", lang)
+            decision_reason = t("REASON_BUY_ACCUMULATE", lang, score=final_score)
         elif final_score >= -1.0:
-            decision = "訊號中性，建議觀望" if lang == "zh" else "Neutral / Hold"
-            decision_reason = (
-                f"量化評分為 {final_score}分，多空訊號相抵，建議觀望。"
-                if lang == "zh"
-                else f"Neutral rating ({final_score} pts). Bullish and bearish signals balance out."
-            )
+            decision = t("DECISION_NEUTRAL", lang)
+            decision_reason = t("REASON_NEUTRAL", lang, score=final_score)
         else:
-            decision = "不建議入場" if lang == "zh" else "Not Recommended"
-            decision_reason = (
-                f"量化評分為 {final_score}分，整體技術面與風報比偏弱。"
-                if lang == "zh"
-                else f"Weak rating ({final_score} pts). Technicals and R/R ratio are weak."
-            )
+            decision = t("DECISION_NOT_RECOMMENDED", lang)
+            decision_reason = t("REASON_NOT_RECOMMENDED", lang, score=final_score)
 
     rr_calc = round((target_price - current_price) / (current_price - support_price), 2) if target_price and (current_price - support_price) > 0 else 0
 
