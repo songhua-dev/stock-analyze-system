@@ -274,6 +274,15 @@ TRANSLATIONS = {
     "MAIN_ERR_ANALYSIS_FAILED": {
         "zh": "量化分析計算發生錯誤: {error}",
         "en": "Quant analysis error: {error}"
+    },
+    #(entry_price_factor.py 中使用)
+    "ENTRY_PRICE_ERR_INSUFFICIENT_DATA": {
+        "zh": "資料不足，無法計算建議進場價",
+        "en": "Insufficient data to calculate entry price."
+    },
+    "ENTRY_PRICE_DETAIL": {
+        "zh": "建議進場價：{low}~{high}元（現價至短期支撐間）；買到賺到價：約{best_value}元（強力支撐附近）",
+        "en": "Suggested Entry: ${low}~${high} (between current price and short-term support); Bargain Price: approx. ${best_value} (near strong support)"
     }
 }
 
@@ -287,12 +296,22 @@ def t(key: str, lang: str = "zh", **kwargs) -> str:
     """
     lang_code = "en" if str(lang).lower().startswith("en") else "zh"
     
-    # 取得對應語言模板，若 Key 不存在則 Fallback 退回 Key 本身
-    template = TRANSLATIONS.get(key, {}).get(lang_code, key)
-    
+    # 1. 確保 TRANSLATIONS 字典中有這個 Key
+    msg_dict = TRANSLATIONS.get(key)
+    if not msg_dict:
+        # 若連字典都找不到這個 key，印出警告方便除錯，並回傳 key
+        print(f"⚠️ [i18n Warning] Key '{key}' not found in TRANSLATIONS dictionary.")
+        return key
+
+    # 2. 取得翻譯範本（找不到對應語言則 fallback 到 'zh'，再找不到才退回 key）
+    template = msg_dict.get(lang_code) or msg_dict.get("zh") or key
+
+    # 3. 處理 kwargs 格式化替換
     if kwargs:
         try:
             return template.format(**kwargs)
-        except KeyError:
+        except Exception as e:
+            print(f"⚠️ [i18n Format Error] Key: '{key}', Template: '{template}', Error: {e}")
             return template
+
     return template
