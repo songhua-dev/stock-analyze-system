@@ -15,7 +15,7 @@ from src.i18n import t
 
 # 載入 config 設定
 try:
-    from src.config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC
+    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC
 except ImportError:
     ENABLE_RANDOM_JITTER = True
     JITTER_MIN_SEC = 0.5
