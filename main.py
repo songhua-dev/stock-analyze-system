@@ -92,7 +92,7 @@ def analyze_route():
 
     factors_param = request.args.get("factors", "")
     selected_factors = [f.strip() for f in factors_param.split(",") if f.strip()]
-    data_source = request.args.get("source", "yfinance")
+    data_source = request.args.get("source", "alpaca")
 
     # Demo 模式防護
     if IS_DEMO_MODE:
@@ -107,8 +107,6 @@ def analyze_route():
 
         last_request_time[client_ip] = current_time
 
-        if data_source == "alpaca":
-            return jsonify({"error": t("MAIN_ERR_DEMO_ALPACA_BLOCKED", lang)}), 400
         if "news" in selected_factors:
             return jsonify({"error": t("MAIN_ERR_DEMO_NEWS_BLOCKED", lang)}), 400
 
