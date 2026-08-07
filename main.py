@@ -138,7 +138,6 @@ def analyze_route():
     cache_key_tp = f"tp_{market}_{symbol}_{data_source}"
     target_price_data = global_cache.get(cache_key_tp, ttl=CACHE_TTL_REALTIME)
     
-    # 增加一個標記，表示資料狀態
     target_data_status = "ok" 
 
     if target_price_data is None:
@@ -152,34 +151,14 @@ def analyze_route():
             print(t("LOG_TARGET_PRICE_SKIPPED", lang, error=e))
             target_data_status = "rate_limited"
 
-    # ... (K線與其他因子計算) ...
+    current_price = float(df['close'].iloc[-1])
+    strong_support = float(df['close'].min())
+    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support
 
-    if "rr" in selected_factors:
-        rr_success = False
-        if target_price_data and isinstance(target_price_data, dict) and target_price_data.get("target_mean") is not None:
-            target_price = target_price_data.get("target_mean")
-            factor_results["rr"] = calculate_rr_score(current_price, strong_support, target_price, lang=lang)
-            rr_success = True
-        else:
-            # 修改：不拋錯，而是標記為未取得
-            factor_results["rr"] = {
-                "score": None,
-                "usable": False,
-                "detail": target_data_status # 將狀態傳遞出去
-            }
-
-    # ... (後續 analyze_stock 呼叫) ...
-    analysis_result = analyze_stock(
-        df=df,
-        target_price_data=target_price_data,
-        factor_results=factor_results,
-        volume_result=volume_result,
-        lang=lang
-    )
-
-    # 4. 因子計算 (在此處才依據 lang 進行 i18n 渲染)
+    # 【重要修正】在此處先初始化 factor_results，避免 UnboundLocalError
     factor_results = {}
 
+    # 4. 因子計算 (在此處才依據 lang 進行 i18n 渲染)
     try:
         factor_results["candlestick"] = calculate_candlestick_score(df, lang=lang)
     except Exception as e:
@@ -199,7 +178,8 @@ def analyze_route():
         if not rr_success:
             factor_results["rr"] = {
                 "score": None,
-                "detail": "Unable to obtain analyst target price (not scored)" if lang == "en" else "無法取得分析師目標價資料（不計入評分）"
+                "usable": False,
+                "detail": target_data_status
             }
 
     if "news" in selected_factors:
