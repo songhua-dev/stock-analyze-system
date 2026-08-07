@@ -12,11 +12,11 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient, NewsClient
 from alpaca.data.requests import StockBarsRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame
-from src.i18n import t
+from i18n import t
 
 # 載入 config 設定
 try:
-    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC, get_yfinance_session
+    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC, get_yfinance_session, FINNHUB_API_KEY
 except ImportError:
     ENABLE_RANDOM_JITTER = True
     JITTER_MIN_SEC = 0.5
@@ -518,3 +518,4 @@ def fetch_stock_name(symbol: str) -> dict:
         return {"symbol": symbol, "stock_name": stock_name}
     except Exception:
         return {"symbol": symbol, "stock_name": symbol}
+

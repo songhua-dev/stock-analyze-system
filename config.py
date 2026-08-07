@@ -11,6 +11,7 @@ ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "DEMO_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "DEMO_SECRET")
 ALPACA_ENDPOINT = os.getenv("ALPACA_ENDPOINT", "https://paper-api.alpaca.markets")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "DEMO_GROQ_KEY")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 
 # 標示目前是否為 Demo 模式
 IS_DEMO_MODE = (ALPACA_API_KEY == "DEMO_KEY" or GROQ_API_KEY == "DEMO_GROQ_KEY")
