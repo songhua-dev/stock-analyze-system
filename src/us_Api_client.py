@@ -12,7 +12,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient, NewsClient
 from alpaca.data.requests import StockBarsRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame
-from i18n import t
+from src.i18n import t
 
 # 載入 config 設定
 try:
