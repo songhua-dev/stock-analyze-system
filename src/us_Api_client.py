@@ -2,6 +2,7 @@
 
 import os
 import time
+import random
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import pandas as pd
@@ -11,6 +12,14 @@ from alpaca.data.historical import StockHistoricalDataClient, NewsClient
 from alpaca.data.requests import StockBarsRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame
 from src.i18n import t
+
+# 載入 config 設定
+try:
+    from src.config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC
+except ImportError:
+    ENABLE_RANDOM_JITTER = True
+    JITTER_MIN_SEC = 0.5
+    JITTER_MAX_SEC = 1.2
 
 # 載入 .env 環境變數
 load_dotenv()
@@ -37,6 +46,13 @@ TARGET_PRICE_CACHE_TTL = 3600  # 快取過期時間設定為 1 小時 (3600 秒)
 # -------------------------------------------------------------------
 # 輔助函式
 # -------------------------------------------------------------------
+
+def _apply_random_jitter():
+    """在發起外部 API 請求前套用隨機浮動延遲，模擬真實操作間隔並降低 Rate Limit 風險"""
+    if ENABLE_RANDOM_JITTER:
+        delay = random.uniform(JITTER_MIN_SEC, JITTER_MAX_SEC)
+        time.sleep(delay)
+
 
 def _find_key_recursive(data, target_keys: list):
     """在巢狀字典或串列中，遞迴搜尋包含指定名稱的 key"""
@@ -73,6 +89,8 @@ def fetch_alpaca_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Data
     if not stock_client:
         raise ValueError(t("ERR_NO_ALPACA_KEY", lang))
 
+    _apply_random_jitter()
+
     # 免費版限制：歷史資料結束時間須為 16 分鐘以前
     end_time = datetime.now() - timedelta(minutes=16)
     start_time = end_time - timedelta(days=days)
@@ -103,6 +121,7 @@ def fetch_alpaca_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Data
 
 def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
     """從 yfinance 抓取 K 線並統一欄位格式 (預設 120 天)"""
+    _apply_random_jitter()
     ticker = yf.Ticker(symbol)
     df = ticker.history(period=f"{days}d")
 
@@ -149,6 +168,8 @@ def fetch_alpaca_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     if not news_client:
         raise ValueError(t("ERR_NO_ALPACA_KEY", lang))
 
+    _apply_random_jitter()
+
     request_params = NewsRequest(symbols=symbol, limit=limit)
     news_res = news_client.get_news(request_params)
 
@@ -193,6 +214,7 @@ def fetch_alpaca_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
 
 def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     """從 yfinance 抓取新聞 (含多層防禦性解析)"""
+    _apply_random_jitter()
     ticker = yf.Ticker(symbol)
     news_items = ticker.news
 
@@ -261,6 +283,7 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
         print(t("WARN_TARGET_PRICE_FALLBACK", lang))
 
     try:
+        _apply_random_jitter()
         ticker = yf.Ticker(symbol_upper)
         info = ticker.info
 
@@ -306,6 +329,7 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
     if source.lower() != 'yfinance':
         print(t("WARN_OPTIONS_FALLBACK", lang))
 
+    _apply_random_jitter()
     ticker = yf.Ticker(symbol)
 
     try:
@@ -330,6 +354,7 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
         target_date = available_dates[-1]
 
     try:
+        _apply_random_jitter()
         chain = ticker.option_chain(target_date)
         call_vol = chain.calls['volume'].fillna(0).sum()
         put_vol = chain.puts['volume'].fillna(0).sum()
@@ -357,6 +382,7 @@ def fetch_stock_name(symbol: str) -> dict:
     取得股票基本資訊（包含公司名稱）
     """
     try:
+        _apply_random_jitter()
         ticker = yf.Ticker(symbol)
         info = ticker.info
         stock_name = info.get("longName") or info.get("shortName") or symbol

@@ -26,3 +26,8 @@ FACTOR_WEIGHTS = {
     "put_call": 1.5,    # 籌碼面
     "news": 1.0,        # 新聞情緒
 }
+
+# 是否啟用請求間的隨機延遲 (本機與 Demo 版皆可套用)
+ENABLE_RANDOM_JITTER = True
+JITTER_MIN_SEC = 0.5
+JITTER_MAX_SEC = 1.2
