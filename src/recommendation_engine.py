@@ -34,11 +34,15 @@ def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dic
 
     factor_lines = []
     
-    # 定義流量限制的提示文字 (透過 i18n 取得，若無則使用預設值)
-    # 建議你將此字串加入 i18n 的 JSON 檔中，例如 key: "DEMO_RATE_LIMIT_WARNING"
-    rate_limit_msg = t("DEMO_RATE_LIMIT_WARNING", lang) if "DEMO_RATE_LIMIT_WARNING" in t.keys() else \
-                     ("Demo版目前被yfinance限制流量，建議至Github下載完整程式碼操作可以避免" if lang == "zh" else \
-                      "Demo version is rate-limited by yfinance. Download full code from Github to avoid this.")
+    # 定義流量限制的提示文字（安全地透過 try-catch 嘗試取得 i18n，若失敗則使用預設備用字串）
+    try:
+        rate_limit_msg = t("DEMO_RATE_LIMIT_WARNING", lang)
+    except Exception:
+        rate_limit_msg = (
+            "Demo版目前被yfinance限制流量，建議至Github下載完整程式碼操作可以避免"
+            if lang == "zh"
+            else "Demo version is rate-limited by yfinance. Download full code from Github to avoid this."
+        )
 
     # 針對使用者選擇並執行的所有因子進行逐一格式化
     for key, result in raw_factor_results.items():
