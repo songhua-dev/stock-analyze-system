@@ -1,4 +1,3 @@
-# src/i18n.py
 """
 統一多語系（i18n）字典與翻譯工具模組
 """
@@ -12,6 +11,16 @@ TRANSLATIONS = {
     "LABEL_PUT_CALL": {"zh": "Put/Call", "en": "Put/Call Ratio"},
     "LABEL_VOLUME": {"zh": "成交量：", "en": "Volume: "},
 
+    # 未取得資料提示
+    "NO_DATA_AVAILABLE": {"zh": "未取得資料", "en": "No Data Available"},
+    "OPTIONS_DATA_TYPE_STOCK": {
+    "zh": "個股選擇權成交量",
+    "en": "Stock Options Volume"
+    },
+    "OPTIONS_DATA_TYPE_MARKET_FALLBACK": {
+    "zh": "大盤選擇權成交量 (無法取得個股成交量，此為大盤成交量)",
+    "en": "Market Options Volume (Stock data unavailable, fallback to market volume)"
+    },
     # 系統訊息與格式
     "ANALYSIS_FAILED": {"zh": "無法分析", "en": "Analysis Failed"},
     "UNKNOWN_ERROR": {"zh": "未知錯誤", "en": "Unknown Error"},
@@ -40,8 +49,8 @@ TRANSLATIONS = {
         "en": "Current price (${current_price:.2f}) broke/hit strong support (${support_price:.2f}). Risk assessment invalidated."
     },
     "VETO_MISSING_TARGET_PRICE": {
-        "zh": "分析師目標價資料缺失，無法計算風險報酬比",
-        "en": "Analyst target price data missing. R/R ratio unavailable."
+        "zh": "分析師目標價資料缺失，無法進行 RR Veto 判斷",
+        "en": "Analyst target price data missing. Cannot evaluate RR veto rule."
     },
     "VETO_TARGET_BELOW_CURRENT": {
         "zh": "分析師目標價 ({target_price:.2f}元)<br>低於或等於現價 ({current_price:.2f}元)<br>資料可能異常或看空",
@@ -275,6 +284,30 @@ TRANSLATIONS = {
         "zh": "量化分析計算發生錯誤: {error}",
         "en": "Quant analysis error: {error}"
     },
+    "LOG_TARGET_PRICE_SKIPPED": {
+        "zh": "⚠️ 抓取目標價失敗/跳過: {error}",
+        "en": "⚠️ Analyst target price fetch failed/skipped: {error}"
+    },
+    "LOG_CANDLESTICK_FAILED": {
+        "zh": "⚠️ Candlestick 計算失敗: {error}",
+        "en": "⚠️ Candlestick score calculation failed: {error}"
+    },
+    "LOG_RR_FAILED": {
+        "zh": "⚠️ RR 計算失敗: {error}",
+        "en": "⚠️ Risk-Reward score calculation failed: {error}"
+    },
+    "LOG_NEWS_FAILED": {
+        "zh": "⚠️ News 計算失敗: {error}",
+        "en": "⚠️ News sentiment score calculation failed: {error}"
+    },
+    "LOG_PUTCALL_FAILED": {
+        "zh": "⚠️ Put/Call 計算失敗: {error}",
+        "en": "⚠️ Put/Call ratio score calculation failed: {error}"
+    },
+    "LOG_ENTRY_PRICE_FAILED": {
+        "zh": "⚠️ Entry Price 計算失敗: {error}",
+        "en": "⚠️ Entry price calculation failed: {error}"
+    },
     #(entry_price_factor.py 中使用)
     "ENTRY_PRICE_ERR_INSUFFICIENT_DATA": {
         "zh": "資料不足，無法計算建議進場價",
@@ -324,11 +357,10 @@ def t(key: str, lang: str = "zh", **kwargs) -> str:
     # 1. 確保 TRANSLATIONS 字典中有這個 Key
     msg_dict = TRANSLATIONS.get(key)
     if not msg_dict:
-        # 若連字典都找不到這個 key，印出警告方便除錯，並回傳 key
         print(f"⚠️ [i18n Warning] Key '{key}' not found in TRANSLATIONS dictionary.")
         return key
 
-    # 2. 取得翻譯範本（找不到對應語言則 fallback 到 'zh'，再找不到才退回 key）
+    # 2. 取得翻譯範本
     template = msg_dict.get(lang_code) or msg_dict.get("zh") or key
 
     # 3. 處理 kwargs 格式化替換

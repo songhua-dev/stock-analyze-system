@@ -11,12 +11,9 @@ import unicodedata  # 用於全形轉半形
 from flask import Flask, request, jsonify, render_template
 
 from src.i18n import t
-from src.us_Api_client import (
-    fetch_stock_data,
-    fetch_analyst_target_price,
-    fetch_options_ratio,
-    fetch_stock_name
-)
+import src.us_Api_client as us_api
+import src.tw_Api_client as tw_api
+
 from src.analyzer import analyze_stock
 from src.recommendation_engine import format_analysis_output
 
@@ -69,9 +66,11 @@ def analyze_route():
     if not symbol:
         return jsonify({"error": t("MAIN_ERR_SYMBOL_REQUIRED", lang)}), 400
 
-    # 市場分流預留接口
+    # 選擇 API Client 模組分流
     if market == "tw":
-        return jsonify({"error": t("MAIN_ERR_TW_API_IN_DEV", lang)}), 501
+        api_client = tw_api
+    else:
+        api_client = us_api
 
     factors_param = request.args.get("factors", "")
     selected_factors = [f.strip() for f in factors_param.split(",") if f.strip()]
@@ -107,7 +106,7 @@ def analyze_route():
 
     # 抓取公司名稱
     try:
-        stock_info = fetch_stock_name(symbol)
+        stock_info = api_client.fetch_stock_name(symbol)
         if isinstance(stock_info, dict):
             stock_name = stock_info.get("stock_name") or symbol
         else:
@@ -115,9 +114,9 @@ def analyze_route():
     except Exception:
         stock_name = symbol
 
-    # 第1步：抓取美股基礎資料 (K線)
+    # 第1步：抓取基礎資料 (K線)
     try:
-        df = fetch_stock_data(symbol, days=120, source=data_source, lang=lang)
+        df = api_client.fetch_stock_data(symbol, days=120, source=data_source, lang=lang)
     except Exception as e:
         err_str = str(e)
         if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
@@ -131,13 +130,13 @@ def analyze_route():
 
     # 若選取 RR 分析或算式分析需要，抓取分析師目標價
     try:
-        target_price_data = fetch_analyst_target_price(symbol, source=data_source, lang=lang)
+        target_price_data = api_client.fetch_analyst_target_price(symbol, source=data_source, lang=lang)
     except ValueError as e:
         if str(e) == "TARGET_PRICE_RATE_LIMITED":
-            # 🚨 直接中斷請求，傳回錯誤提示（比照無代碼/無因子阻斷機制）
+            # 🚨 直接中斷請求，傳回錯誤提示
             return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
     except Exception as e:
-        print(f"⚠️ 抓取目標價失敗/跳過: {e}")
+        print(t("LOG_TARGET_PRICE_SKIPPED", lang, error=e))
 
     # 共用價格基準計算
     current_price = float(df['close'].iloc[-1])
@@ -151,38 +150,58 @@ def analyze_route():
     try:
         factor_results["candlestick"] = calculate_candlestick_score(df, lang=lang)
     except Exception as e:
-        print(f"⚠️ Candlestick 計算失敗: {e}")
+        print(t("LOG_CANDLESTICK_FAILED", lang, error=e))
 
     # RR評分
     if "rr" in selected_factors:
+        rr_success = False
         try:
             if target_price_data and isinstance(target_price_data, dict):
                 target_price = target_price_data.get("target_mean")
                 if target_price is not None:
                     factor_results["rr"] = calculate_rr_score(current_price, strong_support, target_price, lang=lang)
+                    rr_success = True
         except Exception as e:
-            print(f"⚠️ RR 計算失敗: {e}")
+            print(t("LOG_RR_FAILED", lang, error=e))
+
+        # 若抓不到目標價資料，填入無法取得資料提示（score 設為 None 不計分）
+        if not rr_success:
+            no_data_msg = "Unable to obtain analyst target price (not scored)" if lang == "en" else "無法取得分析師目標價資料（不計入評分）"
+            factor_results["rr"] = {
+                "score": None,
+                "detail": no_data_msg
+            }
 
     # 新聞評分
     if "news" in selected_factors:
         try:
             factor_results["news"] = analyze_news_sentiment(symbol, limit=5, source=data_source, lang=lang)
         except Exception as e:
-            print(f"⚠️ News 計算失敗: {e}")
+            print(t("LOG_NEWS_FAILED", lang, error=e))
 
     # Put/Call 選擇權評分
     if "put_call" in selected_factors:
+        pc_success = False
         try:
-            options_data = fetch_options_ratio(symbol, min_days_out=3, lang=lang)
-            if options_data.get("usable"):
+            options_data = api_client.fetch_options_ratio(symbol, min_days_out=3, lang=lang)
+            if options_data and options_data.get("usable"):
                 data_type = options_data.get("data_type")
                 factor_results["put_call"] = calculate_put_call_ratio_score(
                     options_data.get("put_call_ratio"),
                     data_type=data_type,
                     lang=lang
                 )
+                pc_success = True
         except Exception as e:
-            print(f"⚠️ Put/Call 計算失敗: {e}")
+            print(t("LOG_PUTCALL_FAILED", lang, error=e))
+
+        # 若抓不到選擇權資料，填入無法取得資料提示（score 設為 None 不計分）
+        if not pc_success:
+            no_data_msg = "Unable to obtain options data (not scored)" if lang == "en" else "無法取得選擇權資料（不計入評分）"
+            factor_results["put_call"] = {
+                "score": None,
+                "detail": no_data_msg
+            }
 
     # 第3步：成交量乘數
     try:
@@ -194,7 +213,7 @@ def analyze_route():
     try:
         entry_price_data = calculate_entry_price(current_price, short_support, strong_support, lang=lang)
     except Exception as e:
-        print(f"⚠️ Entry Price 計算失敗: {e}")
+        print(t("LOG_ENTRY_PRICE_FAILED", lang, error=e))
         entry_price_data = {"available": False, "detail": ""}
 
     # 第4步：算式整合與分析

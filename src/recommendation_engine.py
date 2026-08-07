@@ -1,4 +1,6 @@
-# src/recommendation_engine.py
+"""
+格式化與建議輸出模組 (recommendation_engine.py)
+"""
 
 from typing import Dict, Optional
 from src.i18n import t
@@ -28,21 +30,31 @@ def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dic
     details = analysis_result.get("details", {})
     factor_details = details.get("factor_details", {})
     factor_scores = details.get("factor_scores", {})
+    raw_factor_results = analysis_result.get("raw_factor_results", {})
 
     factor_lines = []
-    for key, detail in factor_details.items():
-        # 取得多語系因子標籤
+    
+    # 針對使用者選擇並執行的所有因子進行逐一格式化
+    for key, result in raw_factor_results.items():
+        if result is None:
+            continue
+
         i18n_key = FACTOR_KEY_MAP.get(key)
         label = t(i18n_key, lang) if i18n_key else key
 
-        score = factor_scores.get(key)
+        # 檢查該因子是否成功取得有效資料
+        is_usable = result.get("usable", False) if isinstance(result, dict) else False
+        score = factor_scores.get(key) if is_usable else None
 
-        if score is not None:
-            score_str = t("SCORE_PTS", lang, score=score)
-            line = t("FACTOR_LINE_WITH_SCORE", lang, label=label, detail=detail, score_str=score_str)
+        if not is_usable or score is None:
+            # 未取得資料：僅顯示「未取得資料」，不包含分數或細節分析
+            no_data_str = t("NO_DATA_AVAILABLE", lang)
+            line = t("FACTOR_LINE_NO_SCORE", lang, label=label, detail=no_data_str)
             factor_lines.append(line)
         else:
-            line = t("FACTOR_LINE_NO_SCORE", lang, label=label, detail=detail)
+            detail = factor_details.get(key, result.get("detail", ""))
+            score_str = t("SCORE_PTS", lang, score=score)
+            line = t("FACTOR_LINE_WITH_SCORE", lang, label=label, detail=detail, score_str=score_str)
             factor_lines.append(line)
 
     volume_detail = details.get("volume_detail")
@@ -59,13 +71,7 @@ def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dic
     else:
         display_decision = decision_text
 
-    # -----------------------------------------------------------------
-    # 【新增】建議進場價 / 買到賺到價
-    # 這不是計分因子（不在 factor_details 裡），獨立成一個欄位輸出，
-    # 不管 analysis_result 的 status 是 success 還是 veto 都照樣顯示——
-    # 即使系統判定「不建議入場」，使用者可能還是想知道「如果要進，大概在哪個價位」，
-    # 這兩個數字本身不代表「建議你進場」，純粹是價格參考資訊。
-    # -----------------------------------------------------------------
+    # 建議進場價參考資訊 (無論 success 或 veto 均呈現)
     entry_price_output = None
     if entry_price_data and entry_price_data.get("available"):
         entry_price_output = {
