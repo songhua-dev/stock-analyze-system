@@ -60,24 +60,6 @@ def analyze_route():
     lang = request.args.get("lang", "en").lower().strip()
     lang = "en" if lang.startswith("en") else "zh"
 
-    # -----------------------------------------------------------------
-    # 🛡️ 2. 頻繁 Request 防禦 (限流 10 秒)
-    # -----------------------------------------------------------------
-    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if client_ip and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
-
-    current_time = time.time()
-    if client_ip in last_request_time:
-        elapsed = current_time - last_request_time[client_ip]
-        if elapsed < 10:
-            return jsonify({
-                "error": t("MAIN_ERR_RATE_LIMIT", lang)
-            }), 429
-
-    # 更新此 IP 的最新請求時間
-    last_request_time[client_ip] = current_time
-
     market = request.args.get("market", "us").lower().strip()
     raw_symbol = request.args.get("symbol", "")
 
@@ -97,6 +79,23 @@ def analyze_route():
 
     # Demo 模式安全防護
     if IS_DEMO_MODE:
+        # 1. 頻繁 Request 防禦 (限流 10 秒)
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+        if client_ip and "," in client_ip:
+            client_ip = client_ip.split(",")[0].strip()
+
+        current_time = time.time()
+        if client_ip in last_request_time:
+            elapsed = current_time - last_request_time[client_ip]
+            if elapsed < 10:
+                return jsonify({
+                    "error": t("MAIN_ERR_RATE_LIMIT", lang)
+                }), 429
+
+        # 更新此 IP 的最新請求時間
+        last_request_time[client_ip] = current_time
+
+        # 2. 封鎖特定資料源與高消耗因子
         if data_source == "alpaca":
             return jsonify({
                 "error": t("MAIN_ERR_DEMO_ALPACA_BLOCKED", lang)
