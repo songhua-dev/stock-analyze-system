@@ -17,12 +17,14 @@ def check_veto_rules(
     lang: str = "zh"
 ) -> Optional[Dict]:
 
-    # 1. 價格跌破/等於強力支撐
+    # 1. 價格跌破/等於強力支撐 (這個規則保留，因為它主要檢查當前價格)
+    # 注意：如果原本邏輯是 RR 因子開啟才檢查支撐，這邊維持該邏輯
     if "rr" in selected_factors and current_price <= support_price:
         reason = t("VETO_PRICE_BELOW_SUPPORT", lang, current_price=current_price, support_price=support_price)
         return {"veto": True, "reason": reason}
 
-    # 2. RR 相關 Veto：僅在取得目標價時才做判斷（未取得資料則跳過 veto，不直接觸發 veto）
+    # 2. RR 相關 Veto：只有當有 target_price 時才進行邏輯計算
+    # 若 target_price 為 None，則直接跳過此步驟，不執行 Veto 否決
     if "rr" in selected_factors and target_price is not None:
         if target_price <= current_price:
             reason = t("VETO_TARGET_BELOW_CURRENT", lang, target_price=target_price, current_price=current_price)

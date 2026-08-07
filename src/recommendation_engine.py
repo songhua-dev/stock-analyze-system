@@ -13,10 +13,10 @@ FACTOR_KEY_MAP = {
     "put_call": "LABEL_PUT_CALL"
 }
 
-
 def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dict] = None, lang: str = "zh") -> Dict:
     lang = "en" if str(lang).startswith("en") else "zh"
 
+    # 如果分析過程直接報錯，回傳錯誤狀態
     if analysis_result.get("status") == "error":
         return {
             "decision": t("ANALYSIS_FAILED", lang),
@@ -34,6 +34,12 @@ def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dic
 
     factor_lines = []
     
+    # 定義流量限制的提示文字 (透過 i18n 取得，若無則使用預設值)
+    # 建議你將此字串加入 i18n 的 JSON 檔中，例如 key: "DEMO_RATE_LIMIT_WARNING"
+    rate_limit_msg = t("DEMO_RATE_LIMIT_WARNING", lang) if "DEMO_RATE_LIMIT_WARNING" in t.keys() else \
+                     ("Demo版目前被yfinance限制流量，建議至Github下載完整程式碼操作可以避免" if lang == "zh" else \
+                      "Demo version is rate-limited by yfinance. Download full code from Github to avoid this.")
+
     # 針對使用者選擇並執行的所有因子進行逐一格式化
     for key, result in raw_factor_results.items():
         if result is None:
@@ -46,17 +52,24 @@ def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dic
         is_usable = result.get("usable", False) if isinstance(result, dict) else False
         score = factor_scores.get(key) if is_usable else None
 
-        if not is_usable or score is None:
-            # 未取得資料：僅顯示「未取得資料」，不包含分數或細節分析
+        # --- 修改重點：偵測 RR 因子的流量限制狀態 ---
+        if key == "rr" and not is_usable and result.get("detail") == "rate_limited":
+            # 直接顯示流量限制警告，不顯示分數
+            factor_lines.append(f"{label}: {rate_limit_msg}")
+        
+        elif not is_usable or score is None:
+            # 原本的無資料處理
             no_data_str = t("NO_DATA_AVAILABLE", lang)
             line = t("FACTOR_LINE_NO_SCORE", lang, label=label, detail=no_data_str)
             factor_lines.append(line)
         else:
+            # 正常有分數的處理
             detail = factor_details.get(key, result.get("detail", ""))
             score_str = t("SCORE_PTS", lang, score=score)
             line = t("FACTOR_LINE_WITH_SCORE", lang, label=label, detail=detail, score_str=score_str)
             factor_lines.append(line)
 
+    # 成交量處理
     volume_detail = details.get("volume_detail")
     if volume_detail:
         vol_label = t("LABEL_VOLUME", lang)
@@ -71,7 +84,7 @@ def format_analysis_output(analysis_result: Dict, entry_price_data: Optional[Dic
     else:
         display_decision = decision_text
 
-    # 建議進場價參考資訊 (無論 success 或 veto 均呈現)
+    # 建議進場價處理
     entry_price_output = None
     if entry_price_data and entry_price_data.get("available"):
         entry_price_output = {

@@ -137,20 +137,45 @@ def analyze_route():
     # 3. 分析師目標價 (純資料快取)
     cache_key_tp = f"tp_{market}_{symbol}_{data_source}"
     target_price_data = global_cache.get(cache_key_tp, ttl=CACHE_TTL_REALTIME)
+    
+    # 增加一個標記，表示資料狀態
+    target_data_status = "ok" 
+
     if target_price_data is None:
         try:
             target_price_data = api_client.fetch_analyst_target_price(symbol, source=data_source, lang=lang)
             if target_price_data:
                 global_cache.set(cache_key_tp, target_price_data)
-        except ValueError as e:
-            if str(e) == "TARGET_PRICE_RATE_LIMITED":
-                return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
+            else:
+                target_data_status = "missing"
         except Exception as e:
             print(t("LOG_TARGET_PRICE_SKIPPED", lang, error=e))
+            target_data_status = "rate_limited"
 
-    current_price = float(df['close'].iloc[-1])
-    strong_support = float(df['close'].min())
-    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support
+    # ... (K線與其他因子計算) ...
+
+    if "rr" in selected_factors:
+        rr_success = False
+        if target_price_data and isinstance(target_price_data, dict) and target_price_data.get("target_mean") is not None:
+            target_price = target_price_data.get("target_mean")
+            factor_results["rr"] = calculate_rr_score(current_price, strong_support, target_price, lang=lang)
+            rr_success = True
+        else:
+            # 修改：不拋錯，而是標記為未取得
+            factor_results["rr"] = {
+                "score": None,
+                "usable": False,
+                "detail": target_data_status # 將狀態傳遞出去
+            }
+
+    # ... (後續 analyze_stock 呼叫) ...
+    analysis_result = analyze_stock(
+        df=df,
+        target_price_data=target_price_data,
+        factor_results=factor_results,
+        volume_result=volume_result,
+        lang=lang
+    )
 
     # 4. 因子計算 (在此處才依據 lang 進行 i18n 渲染)
     factor_results = {}

@@ -76,6 +76,10 @@ TRANSLATIONS = {
     },
 
     # 決策文字 (Decisions)
+    "DEMO_RATE_LIMIT_WARNING": {
+        "zh": "Demo版目前被yfinance限制流量，建議至Github下載完整程式碼操作可以避免",
+        "en": "Demo version is rate-limited by yfinance. Download full code from Github to avoid this."
+    },
     "DECISION_NOT_RECOMMENDED": {
         "zh": "不建議入場",
         "en": "Not Recommended"
