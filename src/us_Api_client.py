@@ -3,6 +3,7 @@
 import os
 import time
 import random
+import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import pandas as pd
@@ -29,6 +30,7 @@ load_dotenv()
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 
 # 初始化 Alpaca Clients
 stock_client = None
@@ -84,7 +86,7 @@ def _format_dataframe_prices(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # -------------------------------------------------------------------
-# 1. K線資料抓取 (Dual-Track)
+# 1. K線資料抓取 (Tri-Track: Alpaca / Finnhub / yfinance)
 # -------------------------------------------------------------------
 
 def fetch_alpaca_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
@@ -122,6 +124,34 @@ def fetch_alpaca_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Data
     return _format_dataframe_prices(df)
 
 
+def fetch_finnhub_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
+    """從 Finnhub 抓取 K 線並統一欄位格式"""
+    if not FINNHUB_API_KEY:
+        raise ValueError("Missing FINNHUB_API_KEY")
+
+    _apply_random_jitter()
+    to_time = int(time.time())
+    from_time = int((datetime.now() - timedelta(days=days)).timestamp())
+
+    url = f"https://finnhub.io/api/v1/stock/candle?symbol={symbol}&resolution=D&from={from_time}&to={to_time}&token={FINNHUB_API_KEY}"
+    res = requests.get(url, timeout=10)
+    data = res.json()
+
+    if data.get("s") != "ok":
+        raise ValueError(f"Finnhub candle error for {symbol}")
+
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime(data["t"], unit="s"),
+        "open": data["o"],
+        "high": data["h"],
+        "low": data["l"],
+        "close": data["c"],
+        "volume": data["v"]
+    })
+
+    return _format_dataframe_prices(df)
+
+
 def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
     """從 yfinance 抓取 K 線並統一欄位格式 (預設 120 天)"""
     _apply_random_jitter()
@@ -154,17 +184,33 @@ def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Da
 
 
 def fetch_stock_data(symbol: str, days: int = 120, source: str = 'alpaca', lang: str = "zh") -> pd.DataFrame:
-    """統一切換介面：抓取股票 K 線資料 (預設天數調整為 120 天)"""
-    if source.lower() == 'alpaca':
-        return fetch_alpaca_bars(symbol, days, lang=lang)
-    elif source.lower() == 'yfinance':
-        return fetch_yfinance_bars(symbol, days, lang=lang)
-    else:
-        raise ValueError(t("ERR_UNSUPPORTED_SOURCE", lang, source=source))
+    """統一切換介面：抓取股票 K 線資料 (防禦機制：指定來源 -> Alpaca -> Finnhub -> yfinance)"""
+    sources_to_try = []
+    if source.lower() in ['alpaca', 'finnhub', 'yfinance']:
+        sources_to_try.append(source.lower())
+    
+    # 加入後備順序
+    for s in ['alpaca', 'finnhub', 'yfinance']:
+        if s not in sources_to_try:
+            sources_to_try.append(s)
+
+    last_error = None
+    for src in sources_to_try:
+        try:
+            if src == 'alpaca':
+                return fetch_alpaca_bars(symbol, days, lang=lang)
+            elif src == 'finnhub':
+                return fetch_finnhub_bars(symbol, days, lang=lang)
+            elif src == 'yfinance':
+                return fetch_yfinance_bars(symbol, days, lang=lang)
+        except Exception as e:
+            last_error = e
+
+    raise last_error or ValueError(t("ERR_UNSUPPORTED_SOURCE", lang, source=source))
 
 
 # -------------------------------------------------------------------
-# 2. 新聞資料抓取 (Dual-Track)
+# 2. 新聞資料抓取
 # -------------------------------------------------------------------
 
 def fetch_alpaca_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
@@ -216,6 +262,32 @@ def fetch_alpaca_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     return results
 
 
+def fetch_finnhub_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
+    """從 Finnhub 抓取新聞"""
+    if not FINNHUB_API_KEY:
+        raise ValueError("Missing FINNHUB_API_KEY")
+
+    _apply_random_jitter()
+    to_date = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={from_date}&to={to_date}&token={FINNHUB_API_KEY}"
+    res = requests.get(url, timeout=10)
+    items = res.json()
+
+    results = []
+    if isinstance(items, list):
+        for item in items[:limit]:
+            pub_time = datetime.fromtimestamp(item.get("datetime", 0)).strftime('%Y-%m-%d %H:%M') if item.get("datetime") else "N/A"
+            results.append({
+                "created_at": pub_time,
+                "headline": item.get("headline", t("NO_NEWS_TITLE", lang)),
+                "url": item.get("url", ""),
+                "source": "finnhub"
+            })
+    return results
+
+
 def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     """從 yfinance 抓取新聞 (含多層防禦性解析)"""
     _apply_random_jitter()
@@ -258,22 +330,81 @@ def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
 
 
 def fetch_stock_news(symbol: str, limit: int = 5, source: str = 'alpaca', lang: str = "zh") -> list:
-    """統一切換介面：抓取個股新聞"""
-    if source.lower() == 'alpaca':
-        return fetch_alpaca_news(symbol, limit, lang=lang)
-    elif source.lower() == 'yfinance':
-        return fetch_yfinance_news(symbol, limit, lang=lang)
-    else:
-        raise ValueError(t("ERR_UNSUPPORTED_SOURCE", lang, source=source))
+    """統一切換介面：抓取個股新聞 (防禦機制：指定來源 -> Alpaca -> Finnhub -> yfinance)"""
+    sources_to_try = []
+    if source.lower() in ['alpaca', 'finnhub', 'yfinance']:
+        sources_to_try.append(source.lower())
+    
+    for s in ['alpaca', 'finnhub', 'yfinance']:
+        if s not in sources_to_try:
+            sources_to_try.append(s)
+
+    for src in sources_to_try:
+        try:
+            if src == 'alpaca':
+                return fetch_alpaca_news(symbol, limit, lang=lang)
+            elif src == 'finnhub':
+                return fetch_finnhub_news(symbol, limit, lang=lang)
+            elif src == 'yfinance':
+                return fetch_yfinance_news(symbol, limit, lang=lang)
+        except Exception:
+            continue
+
+    return []
 
 
 # -------------------------------------------------------------------
-# 3. 分析師目標價抓取 (含 In-Memory 快取防護機制)
+# 3. 分析師目標價抓取 (防禦邏輯: Alpaca -> Finnhub -> yfinance)
 # -------------------------------------------------------------------
 
-def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str = "zh") -> dict:
+def fetch_finnhub_target_price(symbol: str) -> dict:
+    """從 Finnhub API 抓取目標價"""
+    if not FINNHUB_API_KEY:
+        raise ValueError("Missing FINNHUB_API_KEY")
+
+    _apply_random_jitter()
+    url = f"https://finnhub.io/api/v1/stock/price-target?symbol={symbol}&token={FINNHUB_API_KEY}"
+    res = requests.get(url, timeout=10)
+    data = res.json()
+
+    target_mean = data.get("targetMean")
+    target_high = data.get("targetHigh")
+    target_low = data.get("targetLow")
+
+    if target_mean is None and target_high is None and target_low is None:
+        raise ValueError("Finnhub target price returned empty")
+
+    return {
+        "target_mean": round(target_mean, 2) if isinstance(target_mean, (int, float)) else None,
+        "target_high": round(target_high, 2) if isinstance(target_high, (int, float)) else None,
+        "target_low": round(target_low, 2) if isinstance(target_low, (int, float)) else None,
+        "source": "finnhub"
+    }
+
+
+def fetch_yfinance_target_price(symbol: str) -> dict:
+    """從 yfinance 抓取目標價"""
+    _apply_random_jitter()
+    session = get_yfinance_session()
+    ticker = yf.Ticker(symbol, session=session)
+    info = ticker.info
+
+    target_mean = info.get("targetMeanPrice")
+    target_high = info.get("targetHighPrice")
+    target_low = info.get("targetLowPrice")
+
+    return {
+        "target_mean": round(target_mean, 2) if isinstance(target_mean, (int, float)) else None,
+        "target_high": round(target_high, 2) if isinstance(target_high, (int, float)) else None,
+        "target_low": round(target_low, 2) if isinstance(target_low, (int, float)) else None,
+        "source": "yfinance"
+    }
+
+
+def fetch_analyst_target_price(symbol: str, source: str = 'alpaca', lang: str = "zh") -> dict:
     """
-    抓取分析師目標價 (含快取機制，避免 Render 觸發 429 限制)。
+    抓取分析師目標價 (含快取機制與防禦鏈：Alpaca -> Finnhub -> yfinance)。
+    註：Alpaca 原生 API 未直接提供目標價，因此內部會自動降級至 Finnhub -> yfinance。
     """
     symbol_upper = symbol.upper()
     current_time = time.time()
@@ -284,44 +415,41 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
         if current_time - cached_at < TARGET_PRICE_CACHE_TTL:
             return cached_data
 
-    if source.lower() != 'yfinance':
-        print(t("WARN_TARGET_PRICE_FALLBACK", lang))
+    # 防禦鏈嘗試：Finnhub -> yfinance (Alpaca 無目標價端點)
+    result = None
 
+    # 嘗試 Finnhub
     try:
-        _apply_random_jitter()
-        session = get_yfinance_session()
-        ticker = yf.Ticker(symbol_upper, session=session)
-        info = ticker.info
+        result = fetch_finnhub_target_price(symbol_upper)
+    except Exception as e:
+        print(f"[TargetPrice] Finnhub fetch failed for {symbol_upper}: {e}")
 
-        target_mean = info.get("targetMeanPrice", None)
-        target_high = info.get("targetHighPrice", None)
-        target_low = info.get("targetLowPrice", None)
+    # 嘗試 yfinance
+    if not result:
+        try:
+            result = fetch_yfinance_target_price(symbol_upper)
+        except Exception as e:
+            err_str = str(e)
+            print(f"[TargetPrice] yfinance fetch failed for {symbol_upper}: {e}")
+            if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
+                if symbol_upper in TARGET_PRICE_CACHE:
+                    return TARGET_PRICE_CACHE[symbol_upper][0]
+                raise ValueError("TARGET_PRICE_RATE_LIMITED")
 
-        result = {
-            "target_mean": round(target_mean, 2) if isinstance(target_mean, (int, float)) else None,
-            "target_high": round(target_high, 2) if isinstance(target_high, (int, float)) else None,
-            "target_low": round(target_low, 2) if isinstance(target_low, (int, float)) else None,
-            "source": "yfinance"
-        }
-
-        # 寫入快取
+    if result:
         TARGET_PRICE_CACHE[symbol_upper] = (result, current_time)
         return result
 
-    except Exception as e:
-        err_str = str(e)
-        print(t("WARN_TARGET_PRICE_FETCH_FAILED", lang, error=e))
-        # 降級保護：若抓取失敗，但快取中有過期資料，則繼續沿用舊資料
-        if symbol_upper in TARGET_PRICE_CACHE:
-            return TARGET_PRICE_CACHE[symbol_upper][0]
-        if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
-            raise ValueError("TARGET_PRICE_RATE_LIMITED")
-        return {
-            "target_mean": None,
-            "target_high": None,
-            "target_low": None,
-            "source": "yfinance"
-        }
+    # 後備過期快取或預設值
+    if symbol_upper in TARGET_PRICE_CACHE:
+        return TARGET_PRICE_CACHE[symbol_upper][0]
+
+    return {
+        "target_mean": None,
+        "target_high": None,
+        "target_low": None,
+        "source": "none"
+    }
 
 
 # -------------------------------------------------------------------
@@ -329,12 +457,7 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
 # -------------------------------------------------------------------
 
 def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfinance', lang: str = "zh") -> dict:
-    """
-    抓取選擇權鏈資料，計算 Put/Call Ratio（以當日成交量 Volume 計算）。
-    """
-    if source.lower() != 'yfinance':
-        print(t("WARN_OPTIONS_FALLBACK", lang))
-
+    """抓取選擇權鏈資料，計算 Put/Call Ratio"""
     _apply_random_jitter()
     session = get_yfinance_session()
     ticker = yf.Ticker(symbol, session=session)
@@ -385,9 +508,7 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
 
 
 def fetch_stock_name(symbol: str) -> dict:
-    """
-    取得股票基本資訊（包含公司名稱）
-    """
+    """取得股票基本資訊（包含公司名稱）"""
     try:
         _apply_random_jitter()
         session = get_yfinance_session()

@@ -1,5 +1,3 @@
-# src/tw_Api_client.py
-
 import os
 import time
 import random
@@ -107,8 +105,60 @@ def get_full_tw_stock_list() -> list:
     return all_items
 
 # -------------------------------------------------------------------
-# 1. K線資料抓取 (對齊 fetch_stock_data 參數)
+# 1. K線資料抓取 (TAIFEX 優先，備援至 yfinance)
 # -------------------------------------------------------------------
+
+def fetch_taifex_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
+    """從 TAIFEX OpenAPI 抓取期貨/行情 K 線資料"""
+    _apply_random_jitter()
+    clean_symbol = "".join(filter(str.isalnum, str(symbol))).upper()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*"
+    }
+    
+    url = "https://openapi.taifex.com.tw/v1/DailyMarketReport"
+    resp = requests.get(url, headers=headers, timeout=10)
+    if resp.status_code != 200 or not resp.text.strip():
+        return None
+
+    data = resp.json()
+    matched_rows = []
+    
+    for row in data:
+        prod_code = str(row.get("MarketCode") or row.get("CommodityID") or row.get("Symbol") or "").upper()
+        if clean_symbol in prod_code or prod_code in clean_symbol:
+            matched_rows.append(row)
+
+    if not matched_rows:
+        return None
+
+    df = pd.DataFrame(matched_rows)
+    rename_map = {
+        "Date": "timestamp", "TradingDate": "timestamp",
+        "Open": "open", "OpenPrice": "open",
+        "High": "high", "HighPrice": "high",
+        "Low": "low", "LowPrice": "low",
+        "Close": "close", "ClosePrice": "close",
+        "Volume": "volume", "TradingVolume": "volume"
+    }
+    df = df.rename(columns=rename_map)
+
+    required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    for col in required_cols:
+        if col not in df.columns:
+            return None
+
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    df = df[required_cols].dropna().sort_values('timestamp').tail(days).reset_index(drop=True)
+    if df.empty:
+        return None
+
+    return _format_dataframe_prices(df)
+
 
 def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
     """從 yfinance 抓取台股 K 線資料"""
@@ -148,8 +198,16 @@ def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Da
     return _format_dataframe_prices(df)
 
 
-def fetch_stock_data(symbol: str, days: int = 120, source: str = 'yfinance', lang: str = "zh") -> pd.DataFrame:
-    """與美股保持完全相同介面：抓取股票 K 線資料"""
+def fetch_stock_data(symbol: str, days: int = 120, source: str = 'taifex', lang: str = "zh") -> pd.DataFrame:
+    """抓取股票 K 線資料 (防禦邏輯: 優先 TAIFEX -> 自動降級 yfinance)"""
+    if source.lower() == 'taifex':
+        try:
+            df = fetch_taifex_bars(symbol, days, lang=lang)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass  # 若 TAIFEX 抓取過程失敗，無縫觸發 yfinance 降級備援
+    
     return fetch_yfinance_bars(symbol, days, lang=lang)
 
 # -------------------------------------------------------------------
@@ -191,16 +249,16 @@ def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     return results
 
 
-def fetch_stock_news(symbol: str, limit: int = 5, source: str = 'yfinance', lang: str = "zh") -> list:
-    """與美股保持完全相同介面：抓取個股新聞"""
+def fetch_stock_news(symbol: str, limit: int = 5, source: str = 'taifex', lang: str = "zh") -> list:
+    """抓取個股新聞 (TAIFEX 無新聞，預設直接由 yfinance 提供)"""
     return fetch_yfinance_news(symbol, limit, lang=lang)
 
 # -------------------------------------------------------------------
 # 3. 分析師目標價抓取 (對齊 fetch_analyst_target_price 參數)
 # -------------------------------------------------------------------
 
-def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str = "zh") -> dict:
-    """與美股保持完全相同介面：抓取分析師目標價"""
+def fetch_analyst_target_price(symbol: str, source: str = 'taifex', lang: str = "zh") -> dict:
+    """抓取分析師目標價 (TAIFEX 無目標價，預設直接由 yfinance 提供)"""
     formatted_symbol = _format_tw_symbol(symbol)
     current_time = time.time()
 
@@ -229,7 +287,7 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
         TARGET_PRICE_CACHE[formatted_symbol] = (result, current_time)
         return result
 
-    except Exception as e:
+    except Exception:
         if formatted_symbol in TARGET_PRICE_CACHE:
             return TARGET_PRICE_CACHE[formatted_symbol][0]
         return {
@@ -335,46 +393,3 @@ def fetch_stock_name(symbol: str) -> dict:
     except Exception:
         return {"symbol": formatted_symbol, "stock_name": symbol}
 
-if __name__ == "__main__":
-    test_symbol = "2330"
-    print(f"=== 開始測試台股代號: {test_symbol} ===\n")
-
-    # 1. 測試 K線資料與成交量 (Volume & Candlestick 基礎)
-    try:
-        df_bars = fetch_stock_data(test_symbol, days=30)
-        print("【1. K線資料與成交量 (fetch_stock_data)】")
-        print(f"數據筆數: {len(df_bars)}")
-        print(df_bars.tail(5))
-        print(f"最新一日成交量: {df_bars['volume'].iloc[-1]}\n")
-    except Exception as e:
-        print(f"❌ K線資料抓取失敗: {e}\n")
-
-    # 2. 測試 Put/Call 選擇權比率 (Options Ratio)
-    try:
-        pcr_data = fetch_options_ratio(test_symbol)
-        print("【2. Put/Call 比率 (fetch_options_ratio)】")
-        print(pcr_data)
-        print()
-    except Exception as e:
-        print(f"❌ Put/Call 比率抓取失敗: {e}\n")
-
-    # 3. 測試 分析師目標價 (Analyst Target Price)
-    try:
-        target_data = fetch_analyst_target_price(test_symbol)
-        print("【3. 分析師目標價 (fetch_analyst_target_price)】")
-        print(target_data)
-        print()
-    except Exception as e:
-        print(f"❌ 分析師目標價抓取失敗: {e}\n")
-
-    # 4. 測試 個股新聞 (Stock News)
-    try:
-        news_data = fetch_stock_news(test_symbol, limit=3)
-        print("【4. 個股新聞 (fetch_stock_news)】")
-        for idx, news in enumerate(news_data, 1):
-            print(f"新聞 {idx}: {news.get('headline')} | 時間: {news.get('created_at')}")
-        print()
-    except Exception as e:
-        print(f"❌ 個股新聞抓取失敗: {e}\n")
-
-    print("=== 測試完成 ===")
