@@ -16,11 +16,14 @@ except ModuleNotFoundError:
 
 # 載入 config 設定
 try:
-    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC
+    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC, get_yfinance_session
 except ImportError:
     ENABLE_RANDOM_JITTER = True
     JITTER_MIN_SEC = 0.5
     JITTER_MAX_SEC = 1.2
+    from curl_cffi import requests as curl_requests
+    def get_yfinance_session():
+        return curl_requests.Session(impersonate="chrome110")
 
 load_dotenv()
 
@@ -112,14 +115,15 @@ def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Da
     formatted_symbol = _format_tw_symbol(symbol)
     _apply_random_jitter()
     
-    ticker = yf.Ticker(formatted_symbol)
+    session = get_yfinance_session()
+    ticker = yf.Ticker(formatted_symbol, session=session)
     df = ticker.history(period=f"{days}d")
 
     # 若抓不到資料且沒有 .TWO，嘗試切換上櫃 .TWO 再次抓取
     if df.empty and formatted_symbol.endswith(".TW"):
         alt_symbol = formatted_symbol.replace(".TW", ".TWO")
         _apply_random_jitter()
-        ticker = yf.Ticker(alt_symbol)
+        ticker = yf.Ticker(alt_symbol, session=session)
         df = ticker.history(period=f"{days}d")
 
     if df.empty:
@@ -157,7 +161,8 @@ def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     formatted_symbol = _format_tw_symbol(symbol)
     _apply_random_jitter()
     
-    ticker = yf.Ticker(formatted_symbol)
+    session = get_yfinance_session()
+    ticker = yf.Ticker(formatted_symbol, session=session)
     news_items = ticker.news or []
 
     results = []
@@ -206,7 +211,8 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
 
     try:
         _apply_random_jitter()
-        ticker = yf.Ticker(formatted_symbol)
+        session = get_yfinance_session()
+        ticker = yf.Ticker(formatted_symbol, session=session)
         info = ticker.info
 
         target_mean = info.get("targetMeanPrice", None)
@@ -321,7 +327,8 @@ def fetch_stock_name(symbol: str) -> dict:
     formatted_symbol = _format_tw_symbol(symbol)
     try:
         _apply_random_jitter()
-        ticker = yf.Ticker(formatted_symbol)
+        session = get_yfinance_session()
+        ticker = yf.Ticker(formatted_symbol, session=session)
         info = ticker.info
         stock_name = info.get("longName") or info.get("shortName") or symbol
         return {"symbol": formatted_symbol, "stock_name": stock_name}
@@ -337,7 +344,7 @@ if __name__ == "__main__":
         df_bars = fetch_stock_data(test_symbol, days=30)
         print("【1. K線資料與成交量 (fetch_stock_data)】")
         print(f"數據筆數: {len(df_bars)}")
-        print(df_bars.tail(5))  # 印出最新 5 筆包含 open, high, low, close, volume 的資料
+        print(df_bars.tail(5))
         print(f"最新一日成交量: {df_bars['volume'].iloc[-1]}\n")
     except Exception as e:
         print(f"❌ K線資料抓取失敗: {e}\n")

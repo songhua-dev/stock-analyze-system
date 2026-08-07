@@ -15,11 +15,14 @@ from src.i18n import t
 
 # 載入 config 設定
 try:
-    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC
+    from config import ENABLE_RANDOM_JITTER, JITTER_MIN_SEC, JITTER_MAX_SEC, get_yfinance_session
 except ImportError:
     ENABLE_RANDOM_JITTER = True
     JITTER_MIN_SEC = 0.5
     JITTER_MAX_SEC = 1.2
+    from curl_cffi import requests as curl_requests
+    def get_yfinance_session():
+        return curl_requests.Session(impersonate="chrome110")
 
 # 載入 .env 環境變數
 load_dotenv()
@@ -122,7 +125,8 @@ def fetch_alpaca_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.Data
 def fetch_yfinance_bars(symbol: str, days: int = 120, lang: str = "zh") -> pd.DataFrame:
     """從 yfinance 抓取 K 線並統一欄位格式 (預設 120 天)"""
     _apply_random_jitter()
-    ticker = yf.Ticker(symbol)
+    session = get_yfinance_session()
+    ticker = yf.Ticker(symbol, session=session)
     df = ticker.history(period=f"{days}d")
 
     if df.empty:
@@ -215,7 +219,8 @@ def fetch_alpaca_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
 def fetch_yfinance_news(symbol: str, limit: int = 5, lang: str = "zh") -> list:
     """從 yfinance 抓取新聞 (含多層防禦性解析)"""
     _apply_random_jitter()
-    ticker = yf.Ticker(symbol)
+    session = get_yfinance_session()
+    ticker = yf.Ticker(symbol, session=session)
     news_items = ticker.news
 
     results = []
@@ -284,7 +289,8 @@ def fetch_analyst_target_price(symbol: str, source: str = 'yfinance', lang: str 
 
     try:
         _apply_random_jitter()
-        ticker = yf.Ticker(symbol_upper)
+        session = get_yfinance_session()
+        ticker = yf.Ticker(symbol_upper, session=session)
         info = ticker.info
 
         target_mean = info.get("targetMeanPrice", None)
@@ -330,7 +336,8 @@ def fetch_options_ratio(symbol: str, min_days_out: int = 3, source: str = 'yfina
         print(t("WARN_OPTIONS_FALLBACK", lang))
 
     _apply_random_jitter()
-    ticker = yf.Ticker(symbol)
+    session = get_yfinance_session()
+    ticker = yf.Ticker(symbol, session=session)
 
     try:
         available_dates = ticker.options
@@ -383,7 +390,8 @@ def fetch_stock_name(symbol: str) -> dict:
     """
     try:
         _apply_random_jitter()
-        ticker = yf.Ticker(symbol)
+        session = get_yfinance_session()
+        ticker = yf.Ticker(symbol, session=session)
         info = ticker.info
         stock_name = info.get("longName") or info.get("shortName") or symbol
         return {"symbol": symbol, "stock_name": stock_name}

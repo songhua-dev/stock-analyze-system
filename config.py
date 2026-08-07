@@ -1,6 +1,7 @@
 # config.py
 import os
 from dotenv import load_dotenv
+from curl_cffi import requests as curl_requests
 
 # 載入 .env 檔案中的環境變數
 load_dotenv()
@@ -31,3 +32,10 @@ FACTOR_WEIGHTS = {
 ENABLE_RANDOM_JITTER = True
 JITTER_MIN_SEC = 0.5
 JITTER_MAX_SEC = 1.2
+
+# ===================================================================
+# TLS 指紋 Session 產生器 (防止 Render IP 被 Yahoo 封鎖)
+# ===================================================================
+def get_yfinance_session():
+    """建立偽裝成真實 Chrome 瀏覽器 TLS 指紋的 Session"""
+    return curl_requests.Session(impersonate="chrome110")
