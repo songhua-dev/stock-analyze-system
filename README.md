@@ -29,8 +29,10 @@ Most retail-facing chart tools show you raw indicators and expect you to interpr
 - **News sentiment is LLM-scored under explicit constraints, not free-form.** The prompt restricts high-magnitude scores (±4~5) to concrete categories (verified technical breakthroughs, major contract wins vs. debt exceeding revenue, product recalls); everything else is capped to a narrower ±1~3 band. This exists specifically to reduce subjective drift in LLM scoring.
 - **Dynamic weighted average, not a flat mean.** Each factor's contribution is weighted per `config.py`, normalized across whichever factors the user actually selected — so checking one factor vs. three doesn't skew the scale.
 - **Dual data source (yfinance / Alpaca), switchable.** Analyst target price is yfinance-only (Alpaca's market data API doesn't offer it, at any tier).
+- **"My Favorites" list, stored client-side.** Saved tickers live in the browser's `localStorage` — no account, no server-side database. Trade-off: favorites don't sync across devices or survive a browser data wipe, but there's nothing to authenticate and nothing for the server to store.
+- **Rate limiting is demo-mode only.** A 10-second per-IP request throttle only activates when `DEMO_MODE=true` (the public Render deployment); local/full-featured deployments are unthrottled.
 
-> 中文摘要：因子引擎完全解耦，新增分析方式只要寫一個檔案+在config設權重；否決規則不受使用者勾選影響，永遠強制執行；K線型態依統計可信度分級計分，不是所有型態一視同仁；新聞情緒交給LLM評分，但用明確條件限制高分級距，減少主觀漂移；採動態加權平均，勾選一個或三個因子門檻感受一致；支援yfinance/Alpaca雙資料源切換，分析師目標價僅yfinance提供。
+> 中文摘要：因子引擎完全解耦，新增分析方式只要寫一個檔案+在config設權重；否決規則不受使用者勾選影響，永遠強制執行；K線型態依統計可信度分級計分，不是所有型態一視同仁；新聞情緒交給LLM評分，但用明確條件限制高分級距，減少主觀漂移；採動態加權平均，勾選一個或三個因子門檻感受一致；支援yfinance/Alpaca雙資料源切換，分析師目標價僅yfinance提供；「我的最愛」清單存在瀏覽器localStorage，不需要帳號、不佔用伺服器資料庫，代價是換裝置或清瀏覽器資料會遺失；10秒請求限流只在Demo模式（雲端公開版）啟用，本機/完整功能部署不受限制。
 
 ---
 
@@ -164,8 +166,9 @@ Deployable to Render or similar PaaS:
 - Put/Call ratio is computed from options **volume**, not open interest — both yfinance and Alpaca's free tier returned unreliable/unavailable open interest data during testing, so volume was used as a more consistently populated fallback.
 - News sentiment scoring depends on an LLM call per analysis; scores are the model's constrained-category judgment, not a deterministic calculation like the other factors.
 - Analyst target price is yfinance-only; Alpaca's Market Data API does not offer this at any subscription tier.
+- yfinance enforces its own (undocumented) rate limits independent of this project's demo-mode throttle. When triggered, the app now surfaces a clear "please wait and retry" message instead of silently falling back to a zero/default value — the exact cooldown period isn't published by yfinance, so the message gives an approximate wait time rather than a guaranteed figure.
 
-> 中文摘要：K線可信度分級數據為間接引用，未逐一核對原始出版品；Put/Call比率改用成交量而非未平倉量計算，因為兩邊免費資料源的未平倉量欄位測試下來都不可靠；新聞情緒分數是LLM在限定類別下的判斷，不像其他因子是可重現的定量計算；分析師目標價僅yfinance提供，Alpaca任何方案都沒有這項資料。
+> 中文摘要：K線可信度分級數據為間接引用，未逐一核對原始出版品；Put/Call比率改用成交量而非未平倉量計算，因為兩邊免費資料源的未平倉量欄位測試下來都不可靠；新聞情緒分數是LLM在限定類別下的判斷，不像其他因子是可重現的定量計算；分析師目標價僅yfinance提供，Alpaca任何方案都沒有這項資料；yfinance本身有一套跟本專案Demo限流無關的隱性限流機制，觸發時系統會顯示清楚的「請稍後重試」訊息，不會再悄悄套用0值分析——但確切的等待時間yfinance沒有公開文件說明，訊息裡給的是概估值，非保證數字。
 
 ---
 
