@@ -1,13 +1,14 @@
-# main.py
 """
 Flask 主程式（路由層）
-包含市場參數 (market) 的分流預留接口與 Demo 模式開關控制：
+包含市場參數 (market) 的分流預留接口、共享快取控制與 Demo 模式開關：
 - IS_DEMO_MODE: 讀取環境變數 DEMO_MODE，控制線上展示版與本機全功能版。
+- SharedCache: 純後端記憶體共用快取，解決 429 Too Many Requests 問題。
 """
 
 import os
 import time
 import unicodedata  # 用於全形轉半形
+from typing import Dict, Any, Optional
 from flask import Flask, request, jsonify, render_template
 
 from src.i18n import t
@@ -24,135 +25,143 @@ from src.factors.news_factor import analyze_news_sentiment
 from src.factors.put_call_ratio_factor import calculate_put_call_ratio_score
 from src.factors.entry_price_factor import calculate_entry_price
 
-app = Flask(__name__)
-# 讀取環境變數 DEMO_MODE，預設為 False (本機開發時為全功能版)
-IS_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 
-# 紀錄每個 IP 上一次發送請求的時間戳記（用作 10 秒 Rate Limit 防禦）
+# -----------------------------------------------------------------
+# 🚀 0. 純資料層共享快取機制 (SharedCache)
+# -----------------------------------------------------------------
+class SharedCache:
+    """純後端資料快取類別，不處理任何 UI/i18n，僅暫存 API 回傳物件"""
+    def __init__(self):
+        self._cache: Dict[str, Any] = {}
+        self._timestamp: Dict[str, float] = {}
+
+    def get(self, key: str, ttl: int) -> Optional[Any]:
+        if key in self._cache:
+            if time.time() - self._timestamp[key] < ttl:
+                return self._cache[key]
+            else:
+                del self._cache[key]
+                del self._timestamp[key]
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        self._cache[key] = value
+        self._timestamp[key] = time.time()
+
+
+# 全域共用快取實例與 TTL 設定 (秒)
+global_cache = SharedCache()
+CACHE_TTL_REALTIME = 120        # 即時行情/K線：2 分鐘
+CACHE_TTL_NEWS = 300            # 新聞：5 分鐘
+CACHE_TTL_AFTER_MARKET = 14400  # 盤後資料 (PCR/名稱)：4 小時
+
+
+# -----------------------------------------------------------------
+# 🌐 Flask 應用程式設定
+# -----------------------------------------------------------------
+app = Flask(__name__)
+IS_DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 last_request_time = {}
 
 @app.route('/ping', methods=['GET'])
 def ping():
     return 'ok', 200
 
-# -----------------------------------------------------------------
-# 🛡️ 1. Favicon 防禦路由 (攔截 404 雜訊請求)
-# -----------------------------------------------------------------
 @app.route('/favicon.ico', methods=['GET'])
 def favicon():
     return '', 204
 
 @app.route("/", methods=["GET"])
 def index():
-    """渲染前端主頁面，將 is_demo 狀態傳給 HTML"""
     return render_template("index.html", is_demo=IS_DEMO_MODE)
 
 
 @app.route("/api/analyze", methods=["GET"])
 def analyze_route():
-    """
-    範例請求：/api/analyze?market=us&symbol=PLTR&factors=rr,news&lang=en
-    """
-    # 讀取前端傳來的語言參數（預設為 en）
     lang = request.args.get("lang", "en").lower().strip()
     lang = "en" if lang.startswith("en") else "zh"
 
     market = request.args.get("market", "us").lower().strip()
     raw_symbol = request.args.get("symbol", "")
-
-    # 全形轉半形 + 去空白 + 轉大寫
     symbol = unicodedata.normalize('NFKC', raw_symbol).upper().strip()
 
     if not symbol:
         return jsonify({"error": t("MAIN_ERR_SYMBOL_REQUIRED", lang)}), 400
 
-    # 選擇 API Client 模組分流
-    if market == "tw":
-        api_client = tw_api
-    else:
-        api_client = us_api
+    api_client = tw_api if market == "tw" else us_api
 
     factors_param = request.args.get("factors", "")
     selected_factors = [f.strip() for f in factors_param.split(",") if f.strip()]
     data_source = request.args.get("source", "yfinance")
 
-    # Demo 模式安全防護
+    # Demo 模式防護
     if IS_DEMO_MODE:
-        # 1. 頻繁 Request 防禦 (限流 10 秒)
         client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
         if client_ip and "," in client_ip:
             client_ip = client_ip.split(",")[0].strip()
 
         current_time = time.time()
         if client_ip in last_request_time:
-            elapsed = current_time - last_request_time[client_ip]
-            if elapsed < 10:
-                return jsonify({
-                    "error": t("MAIN_ERR_RATE_LIMIT", lang)
-                }), 429
+            if current_time - last_request_time[client_ip] < 10:
+                return jsonify({"error": t("MAIN_ERR_RATE_LIMIT", lang)}), 429
 
-        # 更新此 IP 的最新請求時間
         last_request_time[client_ip] = current_time
 
-        # 2. 封鎖特定資料源與高消耗因子
         if data_source == "alpaca":
-            return jsonify({
-                "error": t("MAIN_ERR_DEMO_ALPACA_BLOCKED", lang)
-            }), 400
+            return jsonify({"error": t("MAIN_ERR_DEMO_ALPACA_BLOCKED", lang)}), 400
         if "news" in selected_factors:
-            return jsonify({
-                "error": t("MAIN_ERR_DEMO_NEWS_BLOCKED", lang)
-            }), 400
+            return jsonify({"error": t("MAIN_ERR_DEMO_NEWS_BLOCKED", lang)}), 400
 
-    # 抓取公司名稱
-    try:
-        stock_info = api_client.fetch_stock_name(symbol)
-        if isinstance(stock_info, dict):
-            stock_name = stock_info.get("stock_name") or symbol
-        else:
-            stock_name = str(stock_info)
-    except Exception:
-        stock_name = symbol
+    # 1. 股票名稱 (純資料快取)
+    cache_key_name = f"name_{market}_{symbol}"
+    stock_name = global_cache.get(cache_key_name, ttl=CACHE_TTL_AFTER_MARKET)
+    if stock_name is None:
+        try:
+            stock_info = api_client.fetch_stock_name(symbol)
+            stock_name = stock_info.get("stock_name") if isinstance(stock_info, dict) else str(stock_info)
+            global_cache.set(cache_key_name, stock_name)
+        except Exception:
+            stock_name = symbol
 
-    # 第1步：抓取基礎資料 (K線)
-    try:
-        df = api_client.fetch_stock_data(symbol, days=120, source=data_source, lang=lang)
-    except Exception as e:
-        err_str = str(e)
-        if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
-            return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
-            
-        err_msg = t("MAIN_ERR_FETCH_DATA_FAILED", lang, source=data_source, symbol=symbol)
-        return jsonify({"error": err_msg}), 500
+    # 2. 基礎 K線資料 (純資料快取)
+    cache_key_df = f"df_{market}_{symbol}_{data_source}"
+    df = global_cache.get(cache_key_df, ttl=CACHE_TTL_REALTIME)
+    if df is None:
+        try:
+            df = api_client.fetch_stock_data(symbol, days=120, source=data_source, lang=lang)
+            global_cache.set(cache_key_df, df)
+        except Exception as e:
+            err_str = str(e)
+            if "Too Many Requests" in err_str or "Rate limited" in err_str or "429" in err_str:
+                return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
+            return jsonify({"error": t("MAIN_ERR_FETCH_DATA_FAILED", lang, source=data_source, symbol=symbol)}), 500
 
-    # 先將 target_price_data 初始化為 None，避免未宣告引發 NameError
-    target_price_data = None
+    # 3. 分析師目標價 (純資料快取)
+    cache_key_tp = f"tp_{market}_{symbol}_{data_source}"
+    target_price_data = global_cache.get(cache_key_tp, ttl=CACHE_TTL_REALTIME)
+    if target_price_data is None:
+        try:
+            target_price_data = api_client.fetch_analyst_target_price(symbol, source=data_source, lang=lang)
+            if target_price_data:
+                global_cache.set(cache_key_tp, target_price_data)
+        except ValueError as e:
+            if str(e) == "TARGET_PRICE_RATE_LIMITED":
+                return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
+        except Exception as e:
+            print(t("LOG_TARGET_PRICE_SKIPPED", lang, error=e))
 
-    # 若選取 RR 分析或算式分析需要，抓取分析師目標價
-    try:
-        target_price_data = api_client.fetch_analyst_target_price(symbol, source=data_source, lang=lang)
-    except ValueError as e:
-        if str(e) == "TARGET_PRICE_RATE_LIMITED":
-            # 🚨 直接中斷請求，傳回錯誤提示
-            return jsonify({"error": t("MAIN_ERR_RATE_LIMITED", lang)}), 429
-    except Exception as e:
-        print(t("LOG_TARGET_PRICE_SKIPPED", lang, error=e))
-
-    # 共用價格基準計算
     current_price = float(df['close'].iloc[-1])
-    strong_support = float(df['close'].min())  # 近120日最低收盤
-    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support  # 近20日最低收盤
+    strong_support = float(df['close'].min())
+    short_support = float(df['close'].iloc[-20:].min()) if len(df) >= 20 else strong_support
 
-    # 第2步：計算因子
+    # 4. 因子計算 (在此處才依據 lang 進行 i18n 渲染)
     factor_results = {}
 
-    # K線評分
     try:
         factor_results["candlestick"] = calculate_candlestick_score(df, lang=lang)
     except Exception as e:
         print(t("LOG_CANDLESTICK_FAILED", lang, error=e))
 
-    # RR評分
     if "rr" in selected_factors:
         rr_success = False
         try:
@@ -164,59 +173,63 @@ def analyze_route():
         except Exception as e:
             print(t("LOG_RR_FAILED", lang, error=e))
 
-        # 若抓不到目標價資料，填入無法取得資料提示（score 設為 None 不計分）
         if not rr_success:
-            no_data_msg = "Unable to obtain analyst target price (not scored)" if lang == "en" else "無法取得分析師目標價資料（不計入評分）"
             factor_results["rr"] = {
                 "score": None,
-                "detail": no_data_msg
+                "detail": "Unable to obtain analyst target price (not scored)" if lang == "en" else "無法取得分析師目標價資料（不計入評分）"
             }
 
-    # 新聞評分
     if "news" in selected_factors:
         try:
-            factor_results["news"] = analyze_news_sentiment(symbol, limit=5, source=data_source, lang=lang)
+            cache_key_news = f"news_{market}_{symbol}_{data_source}"
+            news_res = global_cache.get(cache_key_news, ttl=CACHE_TTL_NEWS)
+            if news_res is None:
+                news_res = analyze_news_sentiment(symbol, limit=5, source=data_source, lang=lang)
+                if news_res:
+                    global_cache.set(cache_key_news, news_res)
+            if news_res:
+                factor_results["news"] = news_res
         except Exception as e:
             print(t("LOG_NEWS_FAILED", lang, error=e))
 
-    # Put/Call 選擇權評分
     if "put_call" in selected_factors:
         pc_success = False
         try:
-            options_data = api_client.fetch_options_ratio(symbol, min_days_out=3, lang=lang)
+            cache_key_pcr = f"pcr_{market}_{symbol}"
+            options_data = global_cache.get(cache_key_pcr, ttl=CACHE_TTL_AFTER_MARKET)
+            if options_data is None:
+                options_data = api_client.fetch_options_ratio(symbol, min_days_out=3, lang=lang)
+                if options_data and options_data.get("usable"):
+                    global_cache.set(cache_key_pcr, options_data)
+
             if options_data and options_data.get("usable"):
-                data_type = options_data.get("data_type")
                 factor_results["put_call"] = calculate_put_call_ratio_score(
                     options_data.get("put_call_ratio"),
-                    data_type=data_type,
+                    data_type=options_data.get("data_type"),
                     lang=lang
                 )
                 pc_success = True
         except Exception as e:
             print(t("LOG_PUTCALL_FAILED", lang, error=e))
 
-        # 若抓不到選擇權資料，填入無法取得資料提示（score 設為 None 不計分）
         if not pc_success:
-            no_data_msg = "Unable to obtain options data (not scored)" if lang == "en" else "無法取得選擇權資料（不計入評分）"
             factor_results["put_call"] = {
                 "score": None,
-                "detail": no_data_msg
+                "detail": "Unable to obtain options data (not scored)" if lang == "en" else "無法取得選擇權資料（不計入評分）"
             }
 
-    # 第3步：成交量乘數
+    # 5. 進場價與算式整合
     try:
         volume_result = calculate_volume_multiplier(df, lang=lang)
     except Exception:
         volume_result = {"multiplier": 1.0, "detail": ""}
 
-    # 建議進場價計算
     try:
         entry_price_data = calculate_entry_price(current_price, short_support, strong_support, lang=lang)
     except Exception as e:
         print(t("LOG_ENTRY_PRICE_FAILED", lang, error=e))
         entry_price_data = {"available": False, "detail": ""}
 
-    # 第4步：算式整合與分析
     try:
         analysis_result = analyze_stock(
             df=df,
@@ -227,10 +240,8 @@ def analyze_route():
             lang=lang
         )
     except Exception as e:
-        err_msg = t("MAIN_ERR_ANALYSIS_FAILED", lang, error=e)
-        return jsonify({"error": err_msg}), 500
+        return jsonify({"error": t("MAIN_ERR_ANALYSIS_FAILED", lang, error=e)}), 500
 
-    # 第5步：格式化輸出
     formatted_output = format_analysis_output(analysis_result, entry_price_data=entry_price_data, lang=lang)
     formatted_output["stock_name"] = stock_name
     return jsonify(formatted_output)
